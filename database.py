@@ -72,4 +72,3 @@ def encrypt_db():
     with open(DB_FILE, "rb") as f_in:
         with open(ENCRYPTED_FILE, "wb") as f_out:
             pyAesCrypt.encryptStream(f_in, f_out, PASSWORD, BUFFER_SIZE)
-            
