@@ -10,8 +10,10 @@ bot = telebot.TeleBot("7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8")
 admin_id = 350902460
 client_data = {}
 
-main_menu = types.ReplyKeyboardMarkup(resize_keyboard=True)
-main_menu.row("➕ Добавить", "🔍 Найти клиента")
+def main_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("➕ Добавить", "🔍 Найти клиента")
+    return markup
 
 def clear_chat(chat_id):
     try:
@@ -28,7 +30,12 @@ def clear_chat(chat_id):
 def start(message):
     if message.from_user.id != admin_id:
         return bot.send_message(message.chat.id, "Доступ запрещён.")
-    bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=main_menu)
+    clear_chat(message.chat.id)
+    bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=main_keyboard())
+
+@bot.message_handler(func=lambda m: m.text == "Start")
+def handle_start_text(message):
+    start(message)
 
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить")
 def start_add(message):
@@ -43,7 +50,7 @@ def start_add(message):
 def get_identifier(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["method"] = message.text
     bot.send_message(message.chat.id, f"Введите {message.text.lower()}:")
     bot.register_next_step_handler(message, ask_birth_option)
@@ -58,7 +65,7 @@ def ask_birth_option(message):
 def ask_birth_date(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Есть":
         bot.send_message(message.chat.id, "Введите дату рождения (дд.мм.гггг):")
         bot.register_next_step_handler(message, collect_birth_date)
@@ -97,9 +104,11 @@ def ask_reserve_code(message):
 def process_reserve_code(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Да":
-        bot.send_message(message.chat.id, "Загрузите скриншот с резерв кодами\n(или нажмите 'Отмена')")
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add("Отмена")
+        bot.send_message(message.chat.id, "Загрузите скриншот с резерв кодами\nИли нажмите Отмена", reply_markup=markup)
     else:
         client_data["reserve_photo"] = None
         ask_subscription_status(message)
@@ -121,7 +130,7 @@ def ask_subscription_status(message):
 def ask_subscriptions_count(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Нет":
         client_data["subscription_name"] = "Нету"
         client_data["subscription_start"] = ""
@@ -137,7 +146,7 @@ def ask_subscriptions_count(message):
 def choose_first_subscription_type(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["subs_total"] = message.text
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play")
@@ -175,7 +184,7 @@ def process_first_subscription(message):
     end1 = start1 + (timedelta(days=365) if duration == "12м" else timedelta(days=90) if duration == "3м" else timedelta(days=30))
     client_data["sub1_start"] = start1.strftime("%d.%m.%Y")
     client_data["sub1_end"] = end1.strftime("%d.%m.%Y")
-    
+
     if client_data["subs_total"] == "Одна":
         client_data["subscription_name"] = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['sub1_region']}"
         client_data["subscription_start"] = client_data["sub1_start"]
@@ -183,7 +192,7 @@ def process_first_subscription(message):
         client_data["region"] = client_data["sub1_region"]
         ask_games_option(message)
     else:
-        # Выбрать вторую подписку из другой категории
+        # Выбрать вторую подписку — обязательно из другой категории
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         if client_data["sub1_type"] == "EA Play":
             markup.add("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential")
@@ -224,18 +233,14 @@ def process_both_subscriptions(message):
     client_data["sub2_start"] = start2.strftime("%d.%m.%Y")
     client_data["sub2_end"] = end2.strftime("%d.%m.%Y")
 
-    # Формируем итоговые поля
-    sub_name = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['sub1_region']}; " \
-               f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['sub2_region']}"
-    sub_start = f"{client_data['sub1_start']}; {client_data['sub2_start']}"
-    sub_end = f"{client_data['sub1_end']}; {client_data['sub2_end']}"
-    region = f"{client_data['sub1_region']}; {client_data['sub2_region']}"
-
-    client_data["subscription_name"] = sub_name
-    client_data["subscription_start"] = sub_start
-    client_data["subscription_end"] = sub_end
-    client_data["region"] = region
-
+    # Формируем итоговую строку
+    client_data["subscription_name"] = (
+        f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['sub1_region']}; "
+        f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['sub2_region']}"
+    )
+    client_data["subscription_start"] = f"{client_data['sub1_start']}; {client_data['sub2_start']}"
+    client_data["subscription_end"] = f"{client_data['sub1_end']}; {client_data['sub2_end']}"
+    client_data["region"] = f"{client_data['sub1_region']}; {client_data['sub2_region']}"
     ask_games_option(message)
 
 def ask_games_option(message):
@@ -247,7 +252,7 @@ def ask_games_option(message):
 def collect_games(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Нет":
         client_data["games"] = ""
         finish_add(message)
@@ -278,7 +283,7 @@ def finish_add(message):
     )
     add_client(data)
     clear_chat(message.chat.id)
-    bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!", reply_markup=main_menu)
+    bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!", reply_markup=main_keyboard())
 
 if __name__ == "__main__":
     init_db()
