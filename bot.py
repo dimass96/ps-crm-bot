@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 bot = telebot.TeleBot("7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8")
 admin_id = 350902460
 client_data = {}
+user_last_messages = {}
 
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -20,28 +21,32 @@ def start_keyboard():
     markup.add("Start")
     return markup
 
-def clear_chat(chat_id):
-    try:
-        messages = bot.get_chat_history(chat_id, limit=20)
-        for msg in messages:
-            try:
-                bot.delete_message(chat_id, msg.message_id)
-            except:
-                continue
-    except:
-        pass
+def remember_message(message):
+    user_last_messages.setdefault(message.chat.id, []).append(message.message_id)
+    if len(user_last_messages[message.chat.id]) > 30:
+        user_last_messages[message.chat.id] = user_last_messages[message.chat.id][-30:]
+
+def full_clear(chat_id):
+    ids = user_last_messages.get(chat_id, [])
+    for msg_id in ids:
+        try:
+            bot.delete_message(chat_id, msg_id)
+        except:
+            pass
+    user_last_messages[chat_id] = []
 
 @bot.message_handler(commands=['start'])
-def start(message):
+def cmd_start(message):
     if message.from_user.id != admin_id:
         return bot.send_message(message.chat.id, "Доступ запрещён.")
-    clear_chat(message.chat.id)
-    bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=start_keyboard())
+    msg = bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=start_keyboard())
+    remember_message(msg)
 
 @bot.message_handler(func=lambda m: m.text == "Start")
 def handle_start_button(message):
-    clear_chat(message.chat.id)
-    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=main_keyboard())
+    full_clear(message.chat.id)
+    msg = bot.send_message(message.chat.id, "Выберите действие:", reply_markup=main_keyboard())
+    remember_message(msg)
 
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить")
 def start_add(message):
@@ -50,41 +55,46 @@ def start_add(message):
     client_data.clear()
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Номер телефона", "Telegram", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 1: Укажите способ идентификации клиента", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Шаг 1: Укажите способ идентификации клиента", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, get_identifier)
 
 def get_identifier(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["method"] = message.text
-    bot.send_message(message.chat.id, f"Введите {message.text.lower()}:")
+    msg = bot.send_message(message.chat.id, f"Введите {message.text.lower()}:")
+    remember_message(msg)
     bot.register_next_step_handler(message, ask_birth_option)
 
 def ask_birth_option(message):
-    if message.text == "Отмена":
-        clear_chat(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
+    remember_message(message)
     client_data["username"] = message.text.strip()
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Есть", "Нету", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 2: Есть ли дата рождения?", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Шаг 2: Есть ли дата рождения?", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, ask_birth_date)
 
 def ask_birth_date(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Есть":
-        bot.send_message(message.chat.id, "Введите дату рождения (дд.мм.гггг):")
+        msg = bot.send_message(message.chat.id, "Введите дату рождения (дд.мм.гггг):")
+        remember_message(msg)
         bot.register_next_step_handler(message, collect_birth_date)
     else:
         client_data["birth_date"] = "отсутствует"
         ask_account_info(message)
 
 def collect_birth_date(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     try:
         datetime.strptime(message.text.strip(), "%d.%m.%Y")
@@ -96,12 +106,14 @@ def collect_birth_date(message):
 def ask_account_info(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Отмена")
-    bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, process_account_info)
 
 def process_account_info(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     lines = message.text.strip().split('\n')
     email = lines[0] if len(lines) > 0 else ""
@@ -115,12 +127,14 @@ def process_account_info(message):
 def ask_account_region(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("(укр)", "(тур)", "(другое)", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 4: Какой регион аккаунта?", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Шаг 4: Какой регион аккаунта?", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, process_account_region)
 
 def process_account_region(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["region"] = message.text.strip()
     ask_reserve_code(message)
@@ -128,17 +142,20 @@ def process_account_region(message):
 def ask_reserve_code(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 5: Есть резерв коды?", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Шаг 5: Есть резерв коды?", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, process_reserve_code)
 
 def process_reserve_code(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Да":
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         markup.add("Отмена")
-        bot.send_message(message.chat.id, "Загрузите скриншот с резерв кодами\nИли нажмите Отмена", reply_markup=markup)
+        msg = bot.send_message(message.chat.id, "Загрузите скриншот с резерв кодами\nИли нажмите Отмена", reply_markup=markup)
+        remember_message(msg)
     else:
         client_data["reserve_photo"] = None
         ask_subscription_status(message)
@@ -147,6 +164,7 @@ def process_reserve_code(message):
 def handle_reserve_photo(message):
     if "subscription_name" in client_data:
         return
+    remember_message(message)
     file_id = message.photo[-1].file_id
     client_data["reserve_photo"] = file_id
     ask_subscription_status(message)
@@ -154,12 +172,14 @@ def handle_reserve_photo(message):
 def ask_subscription_status(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 6: Оформлена ли подписка?", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Шаг 6: Оформлена ли подписка?", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, ask_subscriptions_count)
 
 def ask_subscriptions_count(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Нет":
         client_data["subscription_name"] = "Нету"
@@ -169,22 +189,26 @@ def ask_subscriptions_count(message):
         return
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Одна", "Две", "Отмена")
-    bot.send_message(message.chat.id, "Сколько подписок оформлено?", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Сколько подписок оформлено?", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, choose_first_subscription_type)
 
 def choose_first_subscription_type(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["subs_total"] = message.text
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play")
-    bot.send_message(message.chat.id, "Выберите первую подписку:", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Выберите первую подписку:", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, choose_first_duration)
 
 def choose_first_duration(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["sub1_type"] = message.text
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
@@ -192,20 +216,24 @@ def choose_first_duration(message):
         markup.add("1м", "12м")
     else:
         markup.add("1м", "3м", "12м")
-    bot.send_message(message.chat.id, "Срок первой подписки:", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Срок первой подписки:", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, choose_first_start)
 
 def choose_first_start(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["sub1_duration"] = message.text
-    bot.send_message(message.chat.id, "Дата оформления первой подписки (дд.мм.гггг):")
+    msg = bot.send_message(message.chat.id, "Дата оформления первой подписки (дд.мм.гггг):")
+    remember_message(msg)
     bot.register_next_step_handler(message, process_first_subscription)
 
 def process_first_subscription(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     try:
         start1 = datetime.strptime(message.text, "%d.%m.%Y")
@@ -227,12 +255,14 @@ def process_first_subscription(message):
             markup.add("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential")
         else:
             markup.add("EA Play")
-        bot.send_message(message.chat.id, "Выберите вторую подписку:", reply_markup=markup)
+        msg = bot.send_message(message.chat.id, "Выберите вторую подписку:", reply_markup=markup)
+        remember_message(msg)
         bot.register_next_step_handler(message, choose_second_duration)
 
 def choose_second_duration(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["sub2_type"] = message.text
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
@@ -240,20 +270,24 @@ def choose_second_duration(message):
         markup.add("1м", "12м")
     else:
         markup.add("1м", "3м", "12м")
-    bot.send_message(message.chat.id, "Срок второй подписки:", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Срок второй подписки:", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, choose_second_start)
 
 def choose_second_start(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["sub2_duration"] = message.text
-    bot.send_message(message.chat.id, "Дата оформления второй подписки (дд.мм.гггг):")
+    msg = bot.send_message(message.chat.id, "Дата оформления второй подписки (дд.мм.гггг):")
+    remember_message(msg)
     bot.register_next_step_handler(message, process_both_subscriptions)
 
 def process_both_subscriptions(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     try:
         start2 = datetime.strptime(message.text, "%d.%m.%Y")
@@ -276,25 +310,30 @@ def process_both_subscriptions(message):
 def ask_games_option(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 7: Есть ли игры?", reply_markup=markup)
+    msg = bot.send_message(message.chat.id, "Шаг 7: Есть ли игры?", reply_markup=markup)
+    remember_message(msg)
     bot.register_next_step_handler(message, collect_games)
 
 def collect_games(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Нет":
         client_data["games"] = ""
         finish_add(message)
     elif message.text == "Да":
-        bot.send_message(message.chat.id, "Введите список игр (по строкам):")
+        msg = bot.send_message(message.chat.id, "Введите список игр (по строкам):")
+        remember_message(msg)
         bot.register_next_step_handler(message, save_games)
     else:
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
+        bot.send_message(message.chat.id, "Ошибка. Начните заново.", reply_markup=main_keyboard())
 
 def save_games(message):
+    remember_message(message)
     if message.text == "Отмена":
-        clear_chat(message.chat.id)
+        full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     games = message.text.split("\n")
     client_data["games"] = " —— ".join(games)
@@ -315,7 +354,7 @@ def finish_add(message):
         client_data.get("reserve_photo", None)
     )
     add_client(data)
-    clear_chat(message.chat.id)
+    full_clear(message.chat.id)
     bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!", reply_markup=main_keyboard())
 
 if __name__ == "__main__":
