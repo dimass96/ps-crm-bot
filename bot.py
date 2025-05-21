@@ -43,7 +43,7 @@ def start_add(message):
 def get_identifier(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
     client_data["method"] = message.text
     bot.send_message(message.chat.id, f"Введите {message.text.lower()}:")
     bot.register_next_step_handler(message, ask_birth_option)
@@ -58,7 +58,7 @@ def ask_birth_option(message):
 def ask_birth_date(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
     if message.text == "Есть":
         bot.send_message(message.chat.id, "Введите дату рождения (дд.мм.гггг):")
         bot.register_next_step_handler(message, collect_birth_date)
@@ -97,18 +97,17 @@ def ask_reserve_code(message):
 def process_reserve_code(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
     if message.text == "Да":
         bot.send_message(message.chat.id, "Загрузите скриншот с резерв кодами")
-        bot.register_next_step_handler(message, save_reserve_photo, content_types=['photo'])
     else:
         client_data["reserve_photo"] = None
         ask_subscription_status(message)
 
-def save_reserve_photo(message):
-    if not message.photo:
-        bot.send_message(message.chat.id, "Это не фото. Отправьте изображение.")
-        return bot.register_next_step_handler(message, save_reserve_photo, content_types=['photo'])
+@bot.message_handler(content_types=['photo'])
+def handle_reserve_photo(message):
+    if "subscription_name" in client_data:
+        return  # уже в процессе не резерва
     file_id = message.photo[-1].file_id
     client_data["reserve_photo"] = file_id
     ask_subscription_status(message)
@@ -120,6 +119,9 @@ def ask_subscription_status(message):
     bot.register_next_step_handler(message, ask_subscriptions_count)
 
 def ask_subscriptions_count(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
     if message.text == "Нет":
         client_data["subscription_name"] = "Нету"
         client_data["subscription_start"] = ""
@@ -135,7 +137,7 @@ def ask_subscriptions_count(message):
 def choose_first_subscription(message):
     if message.text == "Отмена":
         clear_chat(message.chat.id)
-        return
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
     client_data["subs_total"] = message.text
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play")
@@ -181,6 +183,9 @@ def ask_games_option(message):
     bot.register_next_step_handler(message, collect_games)
 
 def collect_games(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_menu)
     if message.text == "Нет":
         client_data["games"] = ""
         finish_add(message)
