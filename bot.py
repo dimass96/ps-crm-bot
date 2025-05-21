@@ -1,6 +1,6 @@
 import telebot
 from telebot import types
-from database import init_db, add_client
+from database import init_db, add_client, get_client_by_identifier, update_client_field, delete_client_by_id
 from datetime import datetime, timedelta
 
 bot = telebot.TeleBot("7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8")
@@ -26,6 +26,7 @@ def full_clear(chat_id):
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("➕ Добавить", "🔍 Найти клиента")
+    markup.add("Start")
     return markup
 
 @bot.message_handler(commands=['start'])
@@ -36,11 +37,14 @@ def start_cmd(message):
     remember_message(msg)
 
 @bot.message_handler(func=lambda m: True)
-def catch_start(m):
-    if m.text.lower() == "start":
-        return start_cmd(m)
+def catch_all_messages(message):
+    if message.text == "Start":
+        return start_cmd(message)
+    if message.text == "➕ Добавить":
+        return start_add(message)
+    if message.text == "🔍 Найти клиента":
+        return search_client(message)
 
-@bot.message_handler(func=lambda m: m.text == "➕ Добавить")
 def start_add(message):
     if message.from_user.id != admin_id:
         return
@@ -238,10 +242,18 @@ def collect_second_duration(message):
 
 def collect_second_date(message):
     remember_message(message)
-    client_data["sub2_duration"] = message.text
-    msg = bot.send_message(message.chat.id, "Дата оформления второй подписки (дд.мм.гггг):")
-    remember_message(msg)
-    bot.register_next_step_handler(message, calculate_subscriptions_double)
+    try:
+        sub2_start = datetime.strptime(message.text, "%d.%m.%Y")
+    except:
+        sub2_start = datetime.now()
+    duration2 = client_data["sub2_duration"]
+    sub2_end = sub2_start + (timedelta(days=365) if duration2 == "12м" else timedelta(days=30))
+    client_data["subscription_start"] = client_data["sub1_start"]
+    client_data["subscription_end"] = sub2_end.strftime("%d.%m.%Y")
+    name1 = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
+    name2 = f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['region']}"
+    client_data["subscription_name"] = f"{name1} + {name2}"
+    ask_games_option(message)
 
 def calculate_subscriptions_single(message):
     remember_message(message)
@@ -254,21 +266,6 @@ def calculate_subscriptions_single(message):
     client_data["subscription_start"] = start.strftime("%d.%m.%Y")
     client_data["subscription_end"] = end.strftime("%d.%m.%Y")
     client_data["subscription_name"] = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
-    ask_games_option(message)
-
-def calculate_subscriptions_double(message):
-    remember_message(message)
-    try:
-        sub2_start = datetime.strptime(message.text, "%d.%m.%Y")
-    except:
-        sub2_start = datetime.now()
-    duration2 = client_data["sub2_duration"]
-    sub2_end = sub2_start + (timedelta(days=365) if duration2 == "12м" else timedelta(days=30))
-    client_data["subscription_start"] = client_data["sub1_start"]
-    client_data["subscription_end"] = client_data["sub2_end"] = sub2_end.strftime("%d.%m.%Y")
-    name1 = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
-    name2 = f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['region']}"
-    client_data["subscription_name"] = f"{name1} + {name2}"
     ask_games_option(message)
 
 def ask_games_option(message):
