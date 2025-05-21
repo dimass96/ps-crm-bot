@@ -12,7 +12,12 @@ client_data = {}
 
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("Start", "➕ Добавить", "🔍 Найти клиента")
+    markup.add("➕ Добавить", "🔍 Найти клиента")
+    return markup
+
+def start_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("Start")
     return markup
 
 def clear_chat(chat_id):
@@ -31,11 +36,12 @@ def start(message):
     if message.from_user.id != admin_id:
         return bot.send_message(message.chat.id, "Доступ запрещён.")
     clear_chat(message.chat.id)
-    bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=main_keyboard())
+    bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=start_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "Start")
-def handle_start_text(message):
-    start(message)
+def handle_start_button(message):
+    clear_chat(message.chat.id)
+    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=main_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить")
 def start_add(message):
@@ -88,7 +94,9 @@ def collect_birth_date(message):
     ask_account_info(message)
 
 def ask_account_info(message):
-    bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Отмена")
+    bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)", reply_markup=markup)
     bot.register_next_step_handler(message, process_account_info)
 
 def process_account_info(message):
