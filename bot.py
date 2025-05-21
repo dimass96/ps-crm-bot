@@ -87,7 +87,8 @@ def process_account_info(message):
     client_data["account_password"] = f"{email};{password}"
     client_data["mail_password"] = mail_pass
     ask_reserve_code(message)
-    def ask_reserve_code(message):
+
+def ask_reserve_code(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет", "Отмена")
     bot.send_message(message.chat.id, "Шаг 4: Есть резерв коды?", reply_markup=markup)
@@ -159,7 +160,8 @@ def collect_first_region(message):
     client_data["sub1_region"] = message.text
     bot.send_message(message.chat.id, "Дата оформления подписки (дд.мм.гггг):")
     bot.register_next_step_handler(message, calculate_subscriptions)
-    def calculate_subscriptions(message):
+
+def calculate_subscriptions(message):
     try:
         start = datetime.strptime(message.text, "%d.%m.%Y")
     except:
