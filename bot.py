@@ -12,7 +12,7 @@ client_data = {}
 
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("➕ Добавить", "🔍 Найти клиента")
+    markup.add("Start", "➕ Добавить", "🔍 Найти клиента")
     return markup
 
 def clear_chat(chat_id):
@@ -56,6 +56,9 @@ def get_identifier(message):
     bot.register_next_step_handler(message, ask_birth_option)
 
 def ask_birth_option(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["username"] = message.text.strip()
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Есть", "Нету", "Отмена")
@@ -74,6 +77,9 @@ def ask_birth_date(message):
         ask_account_info(message)
 
 def collect_birth_date(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     try:
         datetime.strptime(message.text.strip(), "%d.%m.%Y")
         client_data["birth_date"] = message.text.strip()
@@ -86,6 +92,9 @@ def ask_account_info(message):
     bot.register_next_step_handler(message, process_account_info)
 
 def process_account_info(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     lines = message.text.strip().split('\n')
     email = lines[0] if len(lines) > 0 else ""
     password = lines[1] if len(lines) > 1 else ""
@@ -93,12 +102,25 @@ def process_account_info(message):
     client_data["email"] = email
     client_data["account_password"] = f"{email};{password}"
     client_data["mail_password"] = mail_pass
+    ask_account_region(message)
+
+def ask_account_region(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("(укр)", "(тур)", "(другое)", "Отмена")
+    bot.send_message(message.chat.id, "Шаг 4: Какой регион аккаунта?", reply_markup=markup)
+    bot.register_next_step_handler(message, process_account_region)
+
+def process_account_region(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
+    client_data["region"] = message.text.strip()
     ask_reserve_code(message)
 
 def ask_reserve_code(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 4: Есть резерв коды?", reply_markup=markup)
+    bot.send_message(message.chat.id, "Шаг 5: Есть резерв коды?", reply_markup=markup)
     bot.register_next_step_handler(message, process_reserve_code)
 
 def process_reserve_code(message):
@@ -124,7 +146,7 @@ def handle_reserve_photo(message):
 def ask_subscription_status(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 5: Оформлена ли подписка?", reply_markup=markup)
+    bot.send_message(message.chat.id, "Шаг 6: Оформлена ли подписка?", reply_markup=markup)
     bot.register_next_step_handler(message, ask_subscriptions_count)
 
 def ask_subscriptions_count(message):
@@ -135,7 +157,6 @@ def ask_subscriptions_count(message):
         client_data["subscription_name"] = "Нету"
         client_data["subscription_start"] = ""
         client_data["subscription_end"] = ""
-        client_data["region"] = ""
         ask_games_option(message)
         return
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
@@ -154,6 +175,9 @@ def choose_first_subscription_type(message):
     bot.register_next_step_handler(message, choose_first_duration)
 
 def choose_first_duration(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["sub1_type"] = message.text
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     if client_data["sub1_type"] == "EA Play":
@@ -161,21 +185,20 @@ def choose_first_duration(message):
     else:
         markup.add("1м", "3м", "12м")
     bot.send_message(message.chat.id, "Срок первой подписки:", reply_markup=markup)
-    bot.register_next_step_handler(message, choose_first_region)
-
-def choose_first_region(message):
-    client_data["sub1_duration"] = message.text
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("(укр)", "(тур)", "(другое)")
-    bot.send_message(message.chat.id, "Регион первой подписки:", reply_markup=markup)
     bot.register_next_step_handler(message, choose_first_start)
 
 def choose_first_start(message):
-    client_data["sub1_region"] = message.text
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
+    client_data["sub1_duration"] = message.text
     bot.send_message(message.chat.id, "Дата оформления первой подписки (дд.мм.гггг):")
     bot.register_next_step_handler(message, process_first_subscription)
 
 def process_first_subscription(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     try:
         start1 = datetime.strptime(message.text, "%d.%m.%Y")
     except:
@@ -186,13 +209,11 @@ def process_first_subscription(message):
     client_data["sub1_end"] = end1.strftime("%d.%m.%Y")
 
     if client_data["subs_total"] == "Одна":
-        client_data["subscription_name"] = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['sub1_region']}"
+        client_data["subscription_name"] = f"{client_data['sub1_type']} {client_data['sub1_duration']}"
         client_data["subscription_start"] = client_data["sub1_start"]
         client_data["subscription_end"] = client_data["sub1_end"]
-        client_data["region"] = client_data["sub1_region"]
         ask_games_option(message)
     else:
-        # Выбрать вторую подписку — обязательно из другой категории
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         if client_data["sub1_type"] == "EA Play":
             markup.add("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential")
@@ -202,6 +223,9 @@ def process_first_subscription(message):
         bot.register_next_step_handler(message, choose_second_duration)
 
 def choose_second_duration(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     client_data["sub2_type"] = message.text
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     if client_data["sub2_type"] == "EA Play":
@@ -209,21 +233,20 @@ def choose_second_duration(message):
     else:
         markup.add("1м", "3м", "12м")
     bot.send_message(message.chat.id, "Срок второй подписки:", reply_markup=markup)
-    bot.register_next_step_handler(message, choose_second_region)
-
-def choose_second_region(message):
-    client_data["sub2_duration"] = message.text
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("(укр)", "(тур)", "(другое)")
-    bot.send_message(message.chat.id, "Регион второй подписки:", reply_markup=markup)
     bot.register_next_step_handler(message, choose_second_start)
 
 def choose_second_start(message):
-    client_data["sub2_region"] = message.text
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
+    client_data["sub2_duration"] = message.text
     bot.send_message(message.chat.id, "Дата оформления второй подписки (дд.мм.гггг):")
     bot.register_next_step_handler(message, process_both_subscriptions)
 
 def process_both_subscriptions(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     try:
         start2 = datetime.strptime(message.text, "%d.%m.%Y")
     except:
@@ -233,20 +256,19 @@ def process_both_subscriptions(message):
     client_data["sub2_start"] = start2.strftime("%d.%m.%Y")
     client_data["sub2_end"] = end2.strftime("%d.%m.%Y")
 
-    # Формируем итоговую строку
     client_data["subscription_name"] = (
-        f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['sub1_region']}; "
-        f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['sub2_region']}"
+        f"{client_data['sub1_type']} {client_data['sub1_duration']}; "
+        f"{client_data['sub2_type']} {client_data['sub2_duration']}"
     )
     client_data["subscription_start"] = f"{client_data['sub1_start']}; {client_data['sub2_start']}"
     client_data["subscription_end"] = f"{client_data['sub1_end']}; {client_data['sub2_end']}"
-    client_data["region"] = f"{client_data['sub1_region']}; {client_data['sub2_region']}"
+
     ask_games_option(message)
 
 def ask_games_option(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет", "Отмена")
-    bot.send_message(message.chat.id, "Шаг 6: Есть ли игры?", reply_markup=markup)
+    bot.send_message(message.chat.id, "Шаг 7: Есть ли игры?", reply_markup=markup)
     bot.register_next_step_handler(message, collect_games)
 
 def collect_games(message):
@@ -263,6 +285,9 @@ def collect_games(message):
         clear_chat(message.chat.id)
 
 def save_games(message):
+    if message.text == "Отмена":
+        clear_chat(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     games = message.text.split("\n")
     client_data["games"] = " —— ".join(games)
     finish_add(message)
