@@ -4,8 +4,8 @@ import os
 
 DB_FILE = "clients.db"
 ENCRYPTED_FILE = "clients_encrypted.db"
-BUFFER_SIZE = 64 * 1024  # 64KB
-PASSWORD = "your_secure_password"  # Замените на свой
+BUFFER_SIZE = 64 * 1024
+PASSWORD = "pscrm2024"
 
 def init_db():
     if not os.path.exists(DB_FILE):
@@ -47,9 +47,7 @@ def add_client(data):
 def get_client_by_identifier(identifier):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT * FROM clients WHERE username = ?
-    """, (identifier,))
+    cursor.execute("SELECT * FROM clients WHERE username LIKE ?", (f"%{identifier}%",))
     result = cursor.fetchone()
     conn.close()
     return result
@@ -57,9 +55,7 @@ def get_client_by_identifier(identifier):
 def update_client_field(client_id, field, value):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute(f"""
-        UPDATE clients SET {field} = ? WHERE id = ?
-    """, (value, client_id))
+    cursor.execute(f"UPDATE clients SET {field} = ? WHERE id = ?", (value, client_id))
     conn.commit()
     conn.close()
     encrypt_db()
@@ -76,3 +72,4 @@ def encrypt_db():
     with open(DB_FILE, "rb") as f_in:
         with open(ENCRYPTED_FILE, "wb") as f_out:
             pyAesCrypt.encryptStream(f_in, f_out, PASSWORD, BUFFER_SIZE)
+            
