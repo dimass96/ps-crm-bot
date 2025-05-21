@@ -36,15 +36,12 @@ def start_cmd(message):
     msg = bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=main_keyboard())
     remember_message(msg)
 
-@bot.message_handler(func=lambda m: True)
-def catch_all_messages(message):
-    if message.text == "Start":
-        return start_cmd(message)
-    if message.text == "➕ Добавить":
-        return start_add(message)
-    if message.text == "🔍 Найти клиента":
-        return search_client(message)
+@bot.message_handler(func=lambda m: m.text == "Start")
+def handle_start_btn(message):
+    full_clear(message.chat.id)
+    return start_cmd(message)
 
+@bot.message_handler(func=lambda m: m.text == "➕ Добавить")
 def start_add(message):
     if message.from_user.id != admin_id:
         return
@@ -98,12 +95,17 @@ def collect_birth_date(message):
     ask_account_info(message)
 
 def ask_account_info(message):
-    msg = bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Отмена")
+    msg = bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)", reply_markup=markup)
     remember_message(msg)
     bot.register_next_step_handler(message, process_account_info)
 
 def process_account_info(message):
     remember_message(message)
+    if message.text == "Отмена":
+        full_clear(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     lines = message.text.strip().split('\n')
     email = lines[0] if len(lines) > 0 else ""
     password = lines[1] if len(lines) > 1 else ""
@@ -140,17 +142,14 @@ def process_reserve_code(message):
     if message.text == "Да":
         msg = bot.send_message(message.chat.id, "Загрузите скриншот с резерв кодами")
         remember_message(msg)
-        bot.register_next_step_handler(message, save_reserve_photo, content_types=['photo'])
+        bot.register_next_step_handler(message, save_reserve_photo)
     else:
         client_data["reserve_photo"] = None
         ask_subscription_status(message)
 
+@bot.message_handler(content_types=['photo'])
 def save_reserve_photo(message):
     remember_message(message)
-    if not message.photo:
-        msg = bot.send_message(message.chat.id, "Это не фото. Отправьте изображение.")
-        remember_message(msg)
-        return bot.register_next_step_handler(message, save_reserve_photo, content_types=['photo'])
     file_id = message.photo[-1].file_id
     client_data["reserve_photo"] = file_id
     ask_subscription_status(message)
@@ -178,6 +177,8 @@ def ask_subscriptions_count(message):
     msg = bot.send_message(message.chat.id, "Сколько подписок оформлено?", reply_markup=markup)
     remember_message(msg)
     bot.register_next_step_handler(message, choose_first_subscription)
+
+# ...продолжение
 
 def choose_first_subscription(message):
     remember_message(message)
@@ -214,6 +215,19 @@ def collect_first_duration(message):
     else:
         bot.register_next_step_handler(message, collect_second_subscription)
 
+def calculate_subscriptions_single(message):
+    remember_message(message)
+    try:
+        start = datetime.strptime(message.text, "%d.%m.%Y")
+    except:
+        start = datetime.now()
+    duration = client_data["sub1_duration"]
+    end = start + (timedelta(days=365) if duration == "12м" else timedelta(days=90) if duration == "3м" else timedelta(days=30))
+    client_data["subscription_start"] = start.strftime("%d.%m.%Y")
+    client_data["subscription_end"] = end.strftime("%d.%m.%Y")
+    client_data["subscription_name"] = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
+    ask_games_option(message)
+
 def collect_second_subscription(message):
     remember_message(message)
     try:
@@ -224,7 +238,6 @@ def collect_second_subscription(message):
     sub1_end = sub1_start + (timedelta(days=365) if duration == "12м" else timedelta(days=90) if duration == "3м" else timedelta(days=30))
     client_data["sub1_start"] = sub1_start.strftime("%d.%m.%Y")
     client_data["sub1_end"] = sub1_end.strftime("%d.%m.%Y")
-
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("EA Play")
     msg = bot.send_message(message.chat.id, "Выберите вторую подписку:", reply_markup=markup)
@@ -246,26 +259,14 @@ def collect_second_date(message):
         sub2_start = datetime.strptime(message.text, "%d.%m.%Y")
     except:
         sub2_start = datetime.now()
-    duration2 = client_data["sub2_duration"]
+    duration2 = message.text
+    client_data["sub2_duration"] = duration2
     sub2_end = sub2_start + (timedelta(days=365) if duration2 == "12м" else timedelta(days=30))
     client_data["subscription_start"] = client_data["sub1_start"]
     client_data["subscription_end"] = sub2_end.strftime("%d.%m.%Y")
     name1 = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
     name2 = f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['region']}"
     client_data["subscription_name"] = f"{name1} + {name2}"
-    ask_games_option(message)
-
-def calculate_subscriptions_single(message):
-    remember_message(message)
-    try:
-        start = datetime.strptime(message.text, "%d.%m.%Y")
-    except:
-        start = datetime.now()
-    duration = client_data["sub1_duration"]
-    end = start + (timedelta(days=365) if duration == "12м" else timedelta(days=90) if duration == "3м" else timedelta(days=30))
-    client_data["subscription_start"] = start.strftime("%d.%m.%Y")
-    client_data["subscription_end"] = end.strftime("%d.%m.%Y")
-    client_data["subscription_name"] = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
     ask_games_option(message)
 
 def ask_games_option(message):
@@ -290,8 +291,7 @@ def collect_games(message):
 
 def save_games(message):
     remember_message(message)
-    games = message.text.strip().split("\n")
-    client_data["games"] = " —— ".join(games)
+    client_data["games"] = " —— ".join(message.text.strip().split('\n'))
     finish_add(message)
 
 def finish_add(message):
