@@ -56,7 +56,7 @@ def get_identifier(message):
     client_data["method"] = message.text
     msg = bot.send_message(message.chat.id, f"Введите {message.text.lower()}:")
     remember_message(msg)
-    bot.register_next_step_handler(msg, ask_birth_option)import telebot
+bot.register_next_step_handler(msg, ask_birth_option)
 from telebot import types
 from database import init_db, add_client, get_client_by_identifier, update_client_field, delete_client_by_id
 from datetime import datetime, timedelta
