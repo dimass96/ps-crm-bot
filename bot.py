@@ -94,23 +94,29 @@ def ask_account_info(message):
     markup.add("Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(msg, process_account_info)
+    bot.register_next_step_handler(msg, ask_console)
 
-def process_account_info(message):
+def ask_console(message):
     remember_message(message)
-    if message.text == "Отмена":
-        full_clear(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     lines = message.text.strip().split('\n')
     email = lines[0] if len(lines) > 0 else ""
     password = lines[1] if len(lines) > 1 else ""
     mail_pass = lines[2] if len(lines) > 2 else ""
     client_data["email"] = email
-    client_data["account_password"] = f"{email};{password}"
+    client_data["password_raw"] = password
     client_data["mail_password"] = mail_pass
-    ask_region(message)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("PS4", "PS5", "PS4/PS5", "Отмена")
+    msg = bot.send_message(message.chat.id, "Какие консоли?", reply_markup=markup)
+    remember_message(msg)
+    bot.register_next_step_handler(msg, ask_region)
 
 def ask_region(message):
+    remember_message(message)
+    if message.text == "Отмена":
+        full_clear(message.chat.id)
+        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
+    client_data["account_password"] = f"{client_data['email']};{client_data['password_raw']} ({message.text})"
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("(укр)", "(тур)", "(другое)", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 4: Какой регион аккаунта?", reply_markup=markup)
@@ -330,9 +336,10 @@ def send_client_info(chat_id, data):
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("📱 Изменить номер", "📅 Изменить дату рождения")
-    markup.add("🔐 Изменить аккаунт", "🌍 Изменить регион")
+    markup.add("🔐 Изменить данные", "🌍 Изменить регион")
     markup.add("🖼 Изменить резерв коды", "💳 Изменить подписку")
-    markup.add("🎮 Изменить игры", "❌ Отмена")
+    markup.add("🎮 Изменить игры", "🎮 Изменить консоль")
+    markup.add("❌ Отмена")
 
     if data["reserve_photo"]:
         msg = bot.send_photo(chat_id, data["reserve_photo"], caption=text, reply_markup=markup)
