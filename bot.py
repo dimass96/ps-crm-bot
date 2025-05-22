@@ -1,4 +1,6 @@
-_by_id
+import telebot
+from telebot import types
+from database import init_db, add_client, get_client_by_identifier, update_client_field, delete_client_by_id
 from datetime import datetime, timedelta
 import threading
 
@@ -216,8 +218,7 @@ def calculate_subscriptions_single(message):
     end = start + (timedelta(days=365) if duration == "12м" else timedelta(days=90) if duration == "3м" else timedelta(days=30))
     client_data["subscription_start"] = start.strftime("%d.%m.%Y")
     client_data["subscription_end"] = end.strftime("%d.%m.%Y")
-    name = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
-    client_data["subscription_name"] = name
+    client_data["subscription_name"] = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
     ask_games_option(message)
 
 def collect_second_subscription(message):
@@ -256,10 +257,8 @@ def collect_second_date(message):
     sub2_end = sub2_start + (timedelta(days=365) if duration2 == "12м" else timedelta(days=30))
     client_data["subscription_start"] = client_data["sub1_start"]
     client_data["subscription_end"] = sub2_end.strftime("%d.%m.%Y")
-    client_data["sub2_start"] = sub2_start.strftime("%d.%m.%Y")
-    client_data["sub2_end"] = sub2_end.strftime("%d.%m.%Y")
-    name1 = f"{client_data['sub1_type']} {client_data['sub1_duration']}"
-    name2 = f"{client_data['sub2_type']} {client_data['sub2_duration']}"
+    name1 = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
+    name2 = f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['region']}"
     client_data["subscription_name"] = f"{name1} + {name2}"
     ask_games_option(message)
 
@@ -304,32 +303,30 @@ def finish_add(message):
     )
     add_client(data)
     full_clear(message.chat.id)
-    bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!")
+    msg = bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!")
+    remember_message(msg)
     send_client_info(message.chat.id, client_data)
 
 def send_client_info(chat_id, data):
-    subscriptions = data["subscription_name"].split(" + ")
-    lines = []
-    if len(subscriptions) == 2:
-        lines.append(f"💳 {subscriptions[0]}")
-        lines.append(f"📅 {data['sub1_start']} → {data['sub1_end']}")
-        lines.append(f"💳 {subscriptions[1]}")
-        lines.append(f"📅 {data['subscription_start']} → {data['subscription_end']}")
+    subs = data['subscription_name'].split(" + ")
+    subs_text = ""
+    if len(subs) == 2:
+        subs_text = f"💳 {subs[0]}\n📅 {data['subscription_start']} → {data['sub1_end']}\n\n"
+        subs_text += f"💳 {subs[1]}\n📅 {data['subscription_start']} → {data['subscription_end']}"
     else:
-        lines.append(f"💳 {subscriptions[0]}")
-        lines.append(f"📅 {data['subscription_start']} → {data['subscription_end']}")
-    lines.append(f"🌍 Регион: {data['region']}")
+        subs_text = f"💳 {data['subscription_name']}\n📅 {data['subscription_start']} → {data['subscription_end']}"
 
-    if data["games"]:
-        games_text = "🎮 Игры:\n• " + "\n• ".join(data["games"].split(" —— "))
-    else:
-        games_text = "🎮 Игры: Нет"
+    games_block = '🎮 Игры:\n• ' + '\n• '.join(data['games'].split(" —— ")) if data['games'] else '🎮 Игры: Нет'
 
     text = f"""👤 {data['username']} | {data['birth_date']}
 🔐 {data['account_password']}
 ✉️ Почта-пароль: {data['mail_password']}
 
-""" + "\n".join(lines) + "\n\n" + games_text
+{subs_text}
+🌍 Регион: {data['region']}
+
+{games_block}
+"""
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("📱 Изменить номер", "📅 Изменить дату рождения")
