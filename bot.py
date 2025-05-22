@@ -8,7 +8,6 @@ bot = telebot.TeleBot("7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8")
 admin_id = 350902460
 client_data = {}
 temp_messages = {}
-editing_client_id = {}
 
 def remember_message(msg):
     chat_id = msg.chat.id
@@ -251,7 +250,7 @@ def collect_second_duration(message):
     markup.add("12м", "1м", "Отмена")
     msg = bot.send_message(message.chat.id, "Срок второй подписки:", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(msg, collect_second_date)
+    bot.register_next_step_handler(msg, collect_second_date)  # <-- добавлено
 
 def collect_second_date(message):
     remember_message(message)
@@ -264,7 +263,7 @@ def collect_second_date(message):
     client_data["subscription_start"] = client_data["sub1_start"]
     client_data["subscription_end"] = sub2_end.strftime("%d.%m.%Y")
     name1 = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
-    name2 = f"{client_data['sub2_type']} {client_data['sub2_duration']} {client_data['region']}"
+    name2 = f"{client_data['sub2_type']} {duration2} {client_data['region']}"
     client_data["subscription_name"] = f"{name1} + {name2}"
     ask_games_option(message)
 
@@ -336,9 +335,9 @@ def send_client_info(chat_id, data):
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("📱 Изменить номер", "📅 Изменить дату рождения")
-    markup.add("🔐 Изменить данные", "🌍 Изменить регион")
-    markup.add("🖼 Изменить резерв коды", "💳 Изменить подписку")
-    markup.add("🎮 Изменить игры", "🎮 Изменить консоль")
+    markup.add("🔐 Изменить данные", "🎮 Изменить консоль")
+    markup.add("🌍 Изменить регион", "🖼 Изменить резерв коды")
+    markup.add("💳 Изменить подписку", "🎮 Изменить игры")
     markup.add("✅ Сохранить", "❌ Отмена")
 
     if data["reserve_photo"]:
@@ -356,124 +355,6 @@ def send_client_info(chat_id, data):
 
     threading.Thread(target=delete_later, args=(msg.chat.id, msg.message_id)).start()
 
-@bot.message_handler(func=lambda m: m.text.startswith("📱 Изменить номер"))
-def edit_number(message):
-    msg = bot.send_message(message.chat.id, "Введите новый номер или Telegram:")
-    bot.register_next_step_handler(msg, save_new_number)
-
-def save_new_number(message):
-    client_data["username"] = message.text.strip()
-    bot.send_message(message.chat.id, "Изменения обновлены.")
-    send_client_info(message.chat.id, client_data)
-
-@bot.message_handler(func=lambda m: m.text.startswith("📅 Изменить дату рождения"))
-def edit_birth(message):
-    msg = bot.send_message(message.chat.id, "Введите новую дату рождения (дд.мм.гггг):")
-    bot.register_next_step_handler(msg, save_new_birth)
-
-def save_new_birth(message):
-    client_data["birth_date"] = message.text.strip()
-    bot.send_message(message.chat.id, "Изменения обновлены.")
-    send_client_info(message.chat.id, client_data)
-
-@bot.message_handler(func=lambda m: m.text.startswith("🔐 Изменить данные"))
-def edit_account(message):
-    msg = bot.send_message(message.chat.id, "Введите:\nemail\nпароль\nпароль от почты")
-    bot.register_next_step_handler(msg, ask_new_console)
-
-def ask_new_console(message):
-    lines = message.text.strip().split('\n')
-    email = lines[0] if len(lines) > 0 else ""
-    password = lines[1] if len(lines) > 1 else ""
-    mail_pass = lines[2] if len(lines) > 2 else ""
-    client_data["email"] = email
-    client_data["password_raw"] = password
-    client_data["mail_password"] = mail_pass
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("PS4", "PS5", "PS4/PS5")
-    msg = bot.send_message(message.chat.id, "Какие консоли?", reply_markup=markup)
-    bot.register_next_step_handler(msg, save_new_console)
-
-def save_new_console(message):
-    client_data["account_password"] = f"{client_data['email']};{client_data['password_raw']} ({message.text})"
-    bot.send_message(message.chat.id, "Изменения обновлены.")
-    send_client_info(message.chat.id, client_data)
-
-@bot.message_handler(func=lambda m: m.text.startswith("🎮 Изменить консоль"))
-def edit_console_only(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("PS4", "PS5", "PS4/PS5")
-    msg = bot.send_message(message.chat.id, "Выберите консоли:")
-    bot.register_next_step_handler(msg, save_console_only)
-
-def save_console_only(message):
-    parts = client_data["account_password"].split(";")
-    email = parts[0]
-    password = parts[1].split()[0]  # без скобок
-    client_data["account_password"] = f"{email};{password} ({message.text})"
-    bot.send_message(message.chat.id, "Изменения обновлены.")
-    send_client_info(message.chat.id, client_data)
-
-@bot.message_handler(func=lambda m: m.text.startswith("🌍 Изменить регион"))
-def edit_region(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("(укр)", "(тур)", "(другое)")
-    msg = bot.send_message(message.chat.id, "Выберите новый регион:")
-    bot.register_next_step_handler(msg, save_new_region)
-
-def save_new_region(message):
-    client_data["region"] = message.text.strip()
-    bot.send_message(message.chat.id, "Изменения обновлены.")
-    send_client_info(message.chat.id, client_data)
-
-@bot.message_handler(func=lambda m: m.text.startswith("🖼 Изменить резерв коды"))
-def edit_reserve(message):
-    msg = bot.send_message(message.chat.id, "Загрузите новый скриншот с резерв кодами")
-    bot.register_next_step_handler(msg, save_reserve_edit)
-
-def save_reserve_edit(message):
-    if message.content_type == "photo":
-        file_id = message.photo[-1].file_id
-        client_data["reserve_photo"] = file_id
-        bot.send_message(message.chat.id, "Изменения обновлены.")
-        send_client_info(message.chat.id, client_data)
-    else:
-        bot.send_message(message.chat.id, "Ожидался скриншот. Попробуйте снова.")
-
-@bot.message_handler(func=lambda m: m.text.startswith("🎮 Изменить игры"))
-def edit_games(message):
-    current = client_data["games"].replace(" —— ", "\n")
-    msg = bot.send_message(message.chat.id, f"Текущие игры:\n\n{current}\n\nВведите новый список:")
-    bot.register_next_step_handler(msg, save_games_edit)
-
-def save_games_edit(message):
-    client_data["games"] = " —— ".join(message.text.strip().split('\n'))
-    bot.send_message(message.chat.id, "Изменения обновлены.")
-    send_client_info(message.chat.id, client_data)
-
-@bot.message_handler(func=lambda m: m.text == "❌ Отмена")
-def cancel_edit(message):
-    bot.send_message(message.chat.id, "Изменения сохранены.")
-    full_clear(message.chat.id)
-
-@bot.message_handler(func=lambda m: m.text == "✅ Сохранить")
-def save_all_data(message):
-    data = (
-        client_data.get("username", ""),
-        client_data.get("birth_date", ""),
-        client_data.get("email", ""),
-        client_data.get("account_password", ""),
-        client_data.get("mail_password", ""),
-        client_data.get("subscription_name", "не оформлена"),
-        client_data.get("subscription_start", ""),
-        client_data.get("subscription_end", ""),
-        client_data.get("region", ""),
-        client_data.get("games", ""),
-        client_data.get("reserve_photo", None)
-    )
-    add_client(data)
-    full_clear(message.chat.id)
-    bot.send_message(message.chat.id, "Изменения сохранены.")
 if __name__ == "__main__":
     init_db()
     bot.infinity_polling()
