@@ -26,7 +26,6 @@ def full_clear(chat_id):
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("➕ Добавить", "🔍 Найти клиента")
-    markup.add("Start")
     return markup
 
 @bot.message_handler(commands=['start'])
@@ -35,11 +34,6 @@ def start_cmd(message):
         return bot.send_message(message.chat.id, "Доступ запрещён.")
     msg = bot.send_message(message.chat.id, "CRM для PS клиентов", reply_markup=main_keyboard())
     remember_message(msg)
-
-@bot.message_handler(func=lambda m: m.text == "Start")
-def handle_start_btn(message):
-    full_clear(message.chat.id)
-    return start_cmd(message)
 
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить")
 def start_add(message):
@@ -51,7 +45,7 @@ def start_add(message):
     markup.add("Номер телефона", "Telegram", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 1: Укажите способ идентификации клиента", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, get_identifier)
+    bot.register_next_step_handler(msg, get_identifier)
 
 def get_identifier(message):
     remember_message(message)
@@ -61,7 +55,7 @@ def get_identifier(message):
     client_data["method"] = message.text
     msg = bot.send_message(message.chat.id, f"Введите {message.text.lower()}:")
     remember_message(msg)
-    bot.register_next_step_handler(message, ask_birth_option)
+    bot.register_next_step_handler(msg, ask_birth_option)
 
 def ask_birth_option(message):
     remember_message(message)
@@ -70,7 +64,7 @@ def ask_birth_option(message):
     markup.add("Есть", "Нету", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 2: Есть ли дата рождения?", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, ask_birth_date)
+    bot.register_next_step_handler(msg, ask_birth_date)
 
 def ask_birth_date(message):
     remember_message(message)
@@ -80,7 +74,7 @@ def ask_birth_date(message):
     if message.text == "Есть":
         msg = bot.send_message(message.chat.id, "Введите дату рождения (дд.мм.гггг):")
         remember_message(msg)
-        bot.register_next_step_handler(message, collect_birth_date)
+        bot.register_next_step_handler(msg, collect_birth_date)
     else:
         client_data["birth_date"] = "отсутствует"
         ask_account_info(message)
@@ -99,7 +93,7 @@ def ask_account_info(message):
     markup.add("Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 3: Введите:\nemail\nпароль\nпароль от почты (можно пусто)", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, process_account_info)
+    bot.register_next_step_handler(msg, process_account_info)
 
 def process_account_info(message):
     remember_message(message)
@@ -120,7 +114,7 @@ def ask_region(message):
     markup.add("(укр)", "(тур)", "(другое)", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 4: Какой регион аккаунта?", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, ask_reserve_code)
+    bot.register_next_step_handler(msg, ask_reserve_code)
 
 def ask_reserve_code(message):
     remember_message(message)
@@ -132,7 +126,7 @@ def ask_reserve_code(message):
     markup.add("Да", "Нет", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 5: Есть резерв коды?", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, process_reserve_code)
+    bot.register_next_step_handler(msg, process_reserve_code)
 
 def process_reserve_code(message):
     remember_message(message)
@@ -142,7 +136,7 @@ def process_reserve_code(message):
     if message.text == "Да":
         msg = bot.send_message(message.chat.id, "Загрузите скриншот с резерв кодами")
         remember_message(msg)
-        bot.register_next_step_handler(message, save_reserve_photo)
+        bot.register_next_step_handler(msg, save_reserve_photo)
     else:
         client_data["reserve_photo"] = None
         ask_subscription_status(message)
@@ -159,7 +153,7 @@ def ask_subscription_status(message):
     markup.add("Да", "Нет", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 6: Оформлена ли подписка?", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, ask_subscriptions_count)
+    bot.register_next_step_handler(msg, ask_subscriptions_count)
 
 def ask_subscriptions_count(message):
     remember_message(message)
@@ -176,9 +170,7 @@ def ask_subscriptions_count(message):
     markup.add("Одна", "Две", "Отмена")
     msg = bot.send_message(message.chat.id, "Сколько подписок оформлено?", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, choose_first_subscription)
-
-# ...продолжение
+    bot.register_next_step_handler(msg, choose_first_subscription)
 
 def choose_first_subscription(message):
     remember_message(message)
@@ -191,7 +183,7 @@ def choose_first_subscription(message):
     label = "подписку" if message.text == "Одна" else "первую подписку"
     msg = bot.send_message(message.chat.id, f"Выберите {label}:", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, collect_first_subscription)
+    bot.register_next_step_handler(msg, collect_first_subscription)
 
 def collect_first_subscription(message):
     remember_message(message)
@@ -200,7 +192,7 @@ def collect_first_subscription(message):
     markup.add("12м", "3м", "1м", "Отмена")
     msg = bot.send_message(message.chat.id, "Срок подписки:", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, collect_first_duration)
+    bot.register_next_step_handler(msg, collect_first_duration)
 
 def collect_first_duration(message):
     remember_message(message)
@@ -211,9 +203,9 @@ def collect_first_duration(message):
     msg = bot.send_message(message.chat.id, "Дата оформления подписки (дд.мм.гггг):")
     remember_message(msg)
     if client_data["subs_total"] == "Одна":
-        bot.register_next_step_handler(message, calculate_subscriptions_single)
+        bot.register_next_step_handler(msg, calculate_subscriptions_single)
     else:
-        bot.register_next_step_handler(message, collect_second_subscription)
+        bot.register_next_step_handler(msg, collect_second_subscription)
 
 def calculate_subscriptions_single(message):
     remember_message(message)
@@ -242,7 +234,7 @@ def collect_second_subscription(message):
     markup.add("EA Play")
     msg = bot.send_message(message.chat.id, "Выберите вторую подписку:", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, collect_second_duration)
+    bot.register_next_step_handler(msg, collect_second_duration)
 
 def collect_second_duration(message):
     remember_message(message)
@@ -251,7 +243,7 @@ def collect_second_duration(message):
     markup.add("12м", "1м", "Отмена")
     msg = bot.send_message(message.chat.id, "Срок второй подписки:", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, collect_second_date)
+    bot.register_next_step_handler(msg, collect_second_date)
 
 def collect_second_date(message):
     remember_message(message)
@@ -274,7 +266,7 @@ def ask_games_option(message):
     markup.add("Да", "Нет", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 7: Есть ли игры?", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(message, collect_games)
+    bot.register_next_step_handler(msg, collect_games)
 
 def collect_games(message):
     remember_message(message)
@@ -287,7 +279,7 @@ def collect_games(message):
     else:
         msg = bot.send_message(message.chat.id, "Введите список игр (по строкам):")
         remember_message(msg)
-        bot.register_next_step_handler(message, save_games)
+        bot.register_next_step_handler(msg, save_games)
 
 def save_games(message):
     remember_message(message)
