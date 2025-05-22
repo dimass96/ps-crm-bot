@@ -341,6 +341,7 @@ def send_client_info(chat_id, data):
     markup.add("🖼 Изменить резерв коды", "💳 Изменить подписку")
     markup.add("🎮 Изменить игры", "🎮 Изменить консоль")
     markup.add("💾 Сохранить", "❌ Отмена")
+    markup.add("💾 Сохранить", "❌ Отмена")
 
     if data["reserve_photo"]:
         msg = bot.send_photo(chat_id, data["reserve_photo"], caption=text, reply_markup=markup)
