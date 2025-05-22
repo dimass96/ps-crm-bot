@@ -2,6 +2,7 @@ import telebot
 from telebot import types
 from database import init_db, add_client, get_client_by_identifier, update_client_field, delete_client_by_id
 from datetime import datetime, timedelta
+import threading
 
 bot = telebot.TeleBot("7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8")
 admin_id = 350902460
@@ -161,7 +162,7 @@ def ask_subscriptions_count(message):
         full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
     if message.text == "Нет":
-        client_data["subscription_name"] = "Нету"
+        client_data["subscription_name"] = "не оформлена"
         client_data["subscription_start"] = ""
         client_data["subscription_end"] = ""
         ask_games_option(message)
@@ -293,7 +294,7 @@ def finish_add(message):
         client_data.get("email", ""),
         client_data.get("account_password", ""),
         client_data.get("mail_password", ""),
-        client_data.get("subscription_name", "Нету"),
+        client_data.get("subscription_name", "не оформлена"),
         client_data.get("subscription_start", ""),
         client_data.get("subscription_end", ""),
         client_data.get("region", ""),
@@ -302,7 +303,41 @@ def finish_add(message):
     )
     add_client(data)
     full_clear(message.chat.id)
-    bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!", reply_markup=main_keyboard())
+    msg = bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!")
+    send_client_info(message.chat.id, client_data)
+    remember_message(msg)
+
+def send_client_info(chat_id, data):
+    text = f"""👤 {data['username']} | {data['birth_date']}
+🔐 {data['account_password']}
+✉️ Почта-пароль: {data['mail_password']}
+
+💳 {data['subscription_name']}
+📅 {data['subscription_start']} → {data['subscription_end']}
+
+🎮 Игры:
+• """ + "\n• ".join(data['games'].split(" —— ")) if data['games'] else "🎮 Игры: Нет"
+
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("📱 Изменить номер", "📅 Изменить дату рождения")
+    markup.add("🔐 Изменить аккаунт", "🌍 Изменить регион")
+    markup.add("🖼 Изменить резерв коды", "💳 Изменить подписку")
+    markup.add("🎮 Изменить игры", "❌ Отмена")
+
+    if data["reserve_photo"]:
+        msg = bot.send_photo(chat_id, data["reserve_photo"], caption=text, reply_markup=markup)
+    else:
+        msg = bot.send_message(chat_id, text, reply_markup=markup)
+
+    def delete_later(cid, mid):
+        import time
+        time.sleep(300)
+        try:
+            bot.delete_message(cid, mid)
+        except:
+            pass
+
+    threading.Thread(target=delete_later, args=(msg.chat.id, msg.message_id)).start()
 
 if __name__ == "__main__":
     init_db()
