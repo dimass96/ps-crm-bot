@@ -273,24 +273,30 @@ def ask_games_option(message):
     markup.add("Да", "Нет", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 7: Есть ли игры?", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(msg, collect_games)
-
-def collect_games(message):
+    def collect_second_duration(message):
     remember_message(message)
-    if message.text == "Отмена":
-        full_clear(message.chat.id)
-        return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
-    if message.text == "Нет":
-        client_data["games"] = ""
-        finish_add(message)
-    else:
-        msg = bot.send_message(message.chat.id, "Введите список игр (по строкам):")
-        remember_message(msg)
-        bot.register_next_step_handler(msg, save_games)
+    client_data["sub2_type"] = message.text
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("12м", "1м", "Отмена")
+    msg = bot.send_message(message.chat.id, "Срок второй подписки:", reply_markup=markup)
+    remember_message(msg)
+    bot.register_next_step_handler(msg, collect_second_date)
 
-def save_games(message):
+def collect_second_date(message):
     remember_message(message)
-    client_data["games"] = " —— ".join(message.text.strip().split('\n'))
+    client_data["sub2_duration"] = message.text  # исправление: добавлено сохранение
+    try:
+        sub2_start = datetime.strptime(message.text, "%d.%m.%Y")
+    except:
+        sub2_start = datetime.now()
+    duration2 = client_data["sub2_duration"]
+    sub2_end = sub2_start + (timedelta(days=365) if duration2 == "12м" else timedelta(days=30))
+    client_data["subscription_start"] = client_data["sub1_start"]
+    client_data["subscription_end"] = sub2_end.strftime("%d.%m.%Y")
+    name1 = f"{client_data['sub1_type']} {client_data['sub1_duration']} {client_data['region']}"
+    name2 = f"{client_data['sub2_type']} {duration2} {client_data['region']}"
+    client_data["subscription_name"] = f"{name1} + {name2}"
+    ask_games_option(message)
     finish_add(message)
 
 def finish_add(message):
