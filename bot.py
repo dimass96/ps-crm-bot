@@ -8,6 +8,7 @@ bot = telebot.TeleBot("7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8")
 admin_id = 350902460
 client_data = {}
 temp_messages = {}
+editing_client = {}
 
 def remember_message(msg):
     chat_id = msg.chat.id
@@ -250,7 +251,7 @@ def collect_second_duration(message):
     markup.add("12м", "1м", "Отмена")
     msg = bot.send_message(message.chat.id, "Срок второй подписки:", reply_markup=markup)
     remember_message(msg)
-    bot.register_next_step_handler(msg, collect_second_date)  # <-- добавлено
+    bot.register_next_step_handler(msg, collect_second_date)
 
 def collect_second_date(message):
     remember_message(message)
@@ -311,49 +312,6 @@ def finish_add(message):
     msg = bot.send_message(message.chat.id, f"✅ {client_data['username']} добавлен!")
     remember_message(msg)
     send_client_info(message.chat.id, client_data)
-
-def send_client_info(chat_id, data):
-    subs = data['subscription_name'].split(" + ")
-    subs_text = ""
-    if len(subs) == 2:
-        subs_text = f"💳 {subs[0]}\n📅 {data['subscription_start']} → {data['sub1_end']}\n\n"
-        subs_text += f"💳 {subs[1]}\n📅 {data['subscription_start']} → {data['subscription_end']}"
-    else:
-        subs_text = f"💳 {data['subscription_name']}\n📅 {data['subscription_start']} → {data['subscription_end']}"
-
-    games_block = '🎮 Игры:\n• ' + '\n• '.join(data['games'].split(" —— ")) if data['games'] else '🎮 Игры: Нет'
-
-    text = f"""👤 {data['username']} | {data['birth_date']}
-🔐 {data['account_password']}
-✉️ Почта-пароль: {data['mail_password']}
-
-{subs_text}
-🌍 Регион: {data['region']}
-
-{games_block}
-"""
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("📱 Изменить номер", "📅 Изменить дату рождения")
-    markup.add("🔐 Изменить данные", "🎮 Изменить консоль")
-    markup.add("🌍 Изменить регион", "🖼 Изменить резерв коды")
-    markup.add("💳 Изменить подписку", "🎮 Изменить игры")
-    markup.add("✅ Сохранить", "❌ Отмена")
-
-    if data["reserve_photo"]:
-        msg = bot.send_photo(chat_id, data["reserve_photo"], caption=text, reply_markup=markup)
-    else:
-        msg = bot.send_message(chat_id, text, reply_markup=markup)
-
-    def delete_later(cid, mid):
-        import time
-        time.sleep(300)
-        try:
-            bot.delete_message(cid, mid)
-        except:
-            pass
-
-    threading.Thread(target=delete_later, args=(msg.chat.id, msg.message_id)).start()
 
 if __name__ == "__main__":
     init_db()
