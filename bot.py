@@ -118,7 +118,9 @@ def ask_region(message):
     if message.text == "Отмена":
         full_clear(message.chat.id)
         return bot.send_message(message.chat.id, "Добавление отменено.", reply_markup=main_keyboard())
-    client_data[message.chat.id]["account_password"] = f"{client_data[message.chat.id]['email']};{client_data[message.chat.id]['password_raw']} ({message.text})"
+    acc_pass = client_data[message.chat.id]["password_raw"]
+    email = client_data[message.chat.id]["email"]
+    client_data[message.chat.id]["account_password"] = f"{email};{acc_pass} ({message.text})"
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("(укр)", "(тур)", "(другое)", "Отмена")
     msg = bot.send_message(message.chat.id, "Шаг 4: Какой регион аккаунта?", reply_markup=markup)
@@ -226,7 +228,7 @@ def calculate_subscriptions_single(message):
     end = start + (timedelta(days=365) if duration == "12м" else timedelta(days=90) if duration == "3м" else timedelta(days=30))
     client_data[message.chat.id]["subscription_start"] = start.strftime("%d.%m.%Y")
     client_data[message.chat.id]["subscription_end"] = end.strftime("%d.%m.%Y")
-    client_data[message.chat.id]["subscription_name"] = f"{client_data[message.chat.id]['sub1_type']} {duration}"
+    client_data[message.chat.id]["subscription_name"] = f"{client_data[message.chat.id]['sub1_type']} {client_data[message.chat.id]['sub1_duration']} {client_data[message.chat.id]['region']}"
     ask_games_option(message)
 
 def collect_second_subscription(message):
@@ -260,12 +262,12 @@ def collect_second_date(message):
         sub2_start = datetime.strptime(message.text, "%d.%m.%Y")
     except:
         sub2_start = datetime.now()
-    duration2 = message.text
+    duration2 = client_data[message.chat.id]["sub2_duration"]
     sub2_end = sub2_start + (timedelta(days=365) if duration2 == "12м" else timedelta(days=30))
     client_data[message.chat.id]["subscription_start"] = client_data[message.chat.id]["sub1_start"]
     client_data[message.chat.id]["subscription_end"] = sub2_end.strftime("%d.%m.%Y")
-    name1 = f"{client_data[message.chat.id]['sub1_type']} {client_data[message.chat.id]['sub1_duration']}"
-    name2 = f"{client_data[message.chat.id]['sub2_type']} {duration2}"
+    name1 = f"{client_data[message.chat.id]['sub1_type']} {client_data[message.chat.id]['sub1_duration']} {client_data[message.chat.id]['region']}"
+    name2 = f"{client_data[message.chat.id]['sub2_type']} {client_data[message.chat.id]['sub2_duration']} {client_data[message.chat.id]['region']}"
     client_data[message.chat.id]["subscription_name"] = f"{name1} + {name2}"
     ask_games_option(message)
 
@@ -310,7 +312,7 @@ def finish_add(message):
     )
     add_client(data)
     full_clear(message.chat.id)
-    msg = bot.send_message(message.chat.id, f"✅ {client_data[message.chat.id]['username']} добавлен!")
+    msg = bot.send_message(message.chat.id, f"✅ {client_data[message.chat.id]['username']} добавлен!", reply_markup=main_keyboard())
     remember_message(msg)
     send_client_info(message.chat.id, client_data[message.chat.id])
 
@@ -318,8 +320,8 @@ def send_client_info(chat_id, data):
     subs = data['subscription_name'].split(" + ")
     subs_text = ""
     if len(subs) == 2:
-        subs_text = f"💳 {subs[0]}\n📅 {data['subscription_start']} → {data.get('sub1_end', data['subscription_end'])}\n\n"
-        subs_text += f"💳 {subs[1]}\n📅 {data['subscription_start']} → {data['subscription_end']}"
+        subs_text = f"💳 {subs[0]}\n📅 {data['sub1_start']} → {data['sub1_end']}\n\n"
+        subs_text += f"💳 {subs[1]}\n📅 {data['sub1_start']} → {data['subscription_end']}"
     else:
         subs_text = f"💳 {data['subscription_name']}\n📅 {data['subscription_start']} → {data['subscription_end']}"
 
@@ -340,7 +342,7 @@ def send_client_info(chat_id, data):
     markup.add("🔐 Изменить данные", "🌍 Изменить регион")
     markup.add("🖼 Изменить резерв коды", "💳 Изменить подписку")
     markup.add("🎮 Изменить игры", "🎮 Изменить консоль")
-    markup.add("💾 Сохранить", "❌ Отмена")
+    markup.add("✅ Сохранить", "❌ Отмена")
 
     if data["reserve_photo"]:
         msg = bot.send_photo(chat_id, data["reserve_photo"], caption=text, reply_markup=markup)
