@@ -1,2 +1,2 @@
 aiogram==2.25.2
-pyAesCrypt
+pyAesCrypt==6.0.0
