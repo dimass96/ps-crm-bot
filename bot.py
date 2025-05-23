@@ -172,7 +172,7 @@ def info_from_db_row(row):
 @dp.message_handler(commands=['start'])
 async def start_handler(message: types.Message, state: FSMContext):
     await state.finish()
-    await message.answer(" ", reply_markup=build_main_menu())
+    await message.answer("Главное меню:", reply_markup=build_main_menu())
 
 @dp.message_handler(lambda m: m.text == "➕ Добавить клиента")
 async def addclient_step1(message: types.Message, state: FSMContext):
@@ -186,7 +186,7 @@ async def addclient_step2(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     client = await state.get_data()
     client = client.get('client', {})
@@ -201,7 +201,7 @@ async def addclient_step2_1(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     if message.text == "Есть":
         await message.answer("<b>Шаг 2</b>\nВведите дату рождения (дд.мм.гггг):", reply_markup=cancel_kb())
@@ -221,7 +221,7 @@ async def addclient_step3(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     client = await state.get_data()
     client = client.get('client', {})
@@ -235,7 +235,7 @@ async def addclient_step4(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     lines = message.text.strip().split("\n")
     if len(lines) < 2:
@@ -262,7 +262,7 @@ async def addclient_step5(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     region = message.text.strip()
     if region not in ["🇺🇦 Укр", "🇹🇷 Тур", "🌍 Другое"]:
@@ -280,7 +280,7 @@ async def addclient_step6(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     if message.text == "Есть":
         await message.answer("<b>Шаг 5</b>\nСколько подписок у клиента?", reply_markup=sub_count_kb())
@@ -307,7 +307,7 @@ async def addclient_step6_1(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     if message.text == "Одна":
         await message.answer("<b>Шаг 5</b>\nВыбери тип подписки", reply_markup=sub_type1_kb())
@@ -325,7 +325,7 @@ async def addclient_sub1_type(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     if message.text in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
         client = await state.get_data()
@@ -349,7 +349,7 @@ async def addclient_sub1_duration(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     client = await state.get_data()
     client = client.get('client', {})
@@ -369,7 +369,7 @@ async def addclient_sub1_start(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     date = message.text.strip()
     client = await state.get_data()
@@ -390,7 +390,7 @@ async def addclient_sub2_type(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     if message.text == "EA Play":
         client = await state.get_data()
@@ -407,7 +407,7 @@ async def addclient_sub2_duration(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     if message.text not in ["1м", "12м"]:
         await message.answer("EA Play: только 1м или 12м!", reply_markup=sub_duration_ea_kb())
@@ -424,7 +424,7 @@ async def addclient_sub2_start(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     date = message.text.strip()
     client = await state.get_data()
@@ -440,7 +440,7 @@ async def addclient_step7(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     games = message.text.strip().split('\n')
     games = [g.strip() for g in games if g.strip()]
@@ -456,7 +456,7 @@ async def addclient_reserve_exist(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     if message.text == "Есть":
         await message.answer("<b>Шаг 7</b>\nЗагрузите скриншот с резервными кодами:", reply_markup=cancel_kb())
@@ -479,7 +479,7 @@ async def addclient_reserve_upload(message: types.Message, state: FSMContext):
     if message.caption == "❌ Отмена":
         await state.finish()
         await clear_chat(message.chat.id)
-        await message.answer(" ", reply_markup=build_main_menu())
+        await message.answer("Главное меню:", reply_markup=build_main_menu())
         return
     file = await message.document.download()
     file_path = f'reserves/{message.document.file_name}'
