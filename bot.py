@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove, InputFile
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -33,29 +33,6 @@ class AddClient(StatesGroup):
     step_7 = State()
     step_7_1 = State()
 
-class EditClient(StatesGroup):
-    choose_field = State()
-    edit_number = State()
-    edit_birthdate_exist = State()
-    edit_birthdate = State()
-    edit_account = State()
-    edit_region = State()
-    edit_codes = State()
-    edit_subscription = State()
-    edit_subscription_type = State()
-    edit_subscription_subtype = State()
-    edit_subscription_term = State()
-    edit_subscription_date = State()
-    edit_subscription_second_type = State()
-    edit_subscription_second_subtype = State()
-    edit_subscription_second_term = State()
-    edit_subscription_second_date = State()
-    edit_games = State()
-    save_changes = State()
-
-class SearchClient(StatesGroup):
-    search = State()
-
 def load_db():
     if not os.path.exists(DB_PATH):
         return []
@@ -74,26 +51,6 @@ def add_client_to_db(client):
     clients.append(client)
     save_db(clients)
 
-def update_client_in_db(client):
-    clients = load_db()
-    for i, c in enumerate(clients):
-        if c.get("number") == client["number"]:
-            clients[i] = client
-            break
-        elif c.get("number") == "" and c.get("telegram") == client["telegram"]:
-            clients[i] = client
-            break
-    else:
-        clients.append(client)
-    save_db(clients)
-
-def find_client(query):
-    clients = load_db()
-    for c in clients:
-        if c.get("number") == query or c.get("telegram") == query:
-            return c
-    return None
-
 def month_delta(date, months):
     d = datetime.strptime(date, "%d.%m.%Y")
     m = d.month - 1 + months
@@ -109,7 +66,6 @@ def make_client_block(client):
     acc_mail = client.get("mailpass", "")
     region = client.get("region", "отсутствует")
     games = client.get("games", [])
-    codes = client.get("codes", "")
     subs = client.get("subscriptions", [])
     block = f"👤 {number} | {birth}\n"
     block += f"🔐 {acc} ({region})\n" if acc else ""
