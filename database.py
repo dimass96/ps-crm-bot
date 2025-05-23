@@ -15,7 +15,6 @@ def save_client(client):
                 clients = json.load(f)
             except Exception:
                 clients = []
-    # удаляем старого клиента по id, если такой уже есть
     clients = [c for c in clients if c.get("id") != client.get("id")]
     clients.append(client)
     with open(DB_FILE, "w", encoding="utf-8") as f:
