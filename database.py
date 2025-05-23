@@ -1,25 +1,89 @@
 import json
 import os
 
-DB_FILE = "clients_db.json"
+DB_PATH = "clients_db.json"
 
-def save_client(data):
-    clients = []
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            try:
-                clients = json.load(f)
-            except:
-                clients = []
-    clients.append(data)
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
-
-def load_clients():
-    if not os.path.exists(DB_FILE):
+def load_db():
+    if not os.path.exists(DB_PATH):
         return []
-    with open(DB_FILE, "r", encoding="utf-8") as f:
+    with open(DB_PATH, encoding="utf-8") as f:
         try:
             return json.load(f)
-        except:
+        except Exception:
             return []
+
+def save_db(clients):
+    with open(DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(clients, f, ensure_ascii=False, indent=2)
+
+def add_client_to_db(client):
+    clients = load_db()
+    clients.append(client)
+    save_db(clients)
+
+def update_client_in_db(client):
+    clients = load_db()
+    for i, c in enumerate(clients):
+        if c.get("number") == client["number"]:
+            clients[i] = client
+            break
+        elif c.get("number") == "" and c.get("telegram") == client["telegram"]:
+            clients[i] = client
+            break
+    else:
+        clients.append(client)
+    save_db(clients)
+
+def find_client(query):
+    clients = load_db()
+    for c in clients:
+        if c.get("number") == query or c.get("telegram") == query:
+            return c
+    return None
+
+def find_client_partial(query):
+    clients = load_db()
+    for c in clients:
+        if query in (c.get("number") or "") or query in (c.get("telegram") or ""):
+            return c
+    return None
+
+def delete_client(query):
+    clients = load_db()
+    new_clients = []
+    deleted = False
+    for c in clients:
+        if c.get("number") == query or c.get("telegram") == query:
+            deleted = True
+            continue
+        new_clients.append(c)
+    save_db(new_clients)
+    return deleted
+
+def export_all():
+    clients = load_db()
+    result = []
+    for c in clients:
+        number = c.get("number") or c.get("telegram") or ""
+        birth = c.get("birthdate", "отсутствует")
+        acc = c.get("account", "")
+        acc_mail = c.get("mailpass", "")
+        region = c.get("region", "отсутствует")
+        subs = c.get("subscriptions", [])
+        games = c.get("games", [])
+        text = f"Клиент: {number} | {birth}\nАккаунт: {acc} ({region})\n"
+        if acc_mail:
+            text += f"Почта-пароль: {acc_mail}\n"
+        if subs and subs[0].get("name") != "отсутствует":
+            for s in subs:
+                text += f"Подписка: {s['name']} {s['term']} ({region}) с {s['start']} по {s['end']}\n"
+        else:
+            text += "Подписки: отсутствует\n"
+        text += f"Регион: {region}\n"
+        if games:
+            text += "Игры:\n"
+            for g in games:
+                text += f"- {g}\n"
+        text += "\n"
+        result.append(text)
+    return "\n".join(result)
