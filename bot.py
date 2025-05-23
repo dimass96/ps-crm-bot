@@ -122,12 +122,10 @@ def format_info(client):
         "codes": "📷"
     }
     text = ""
-    # Первая строка — номер/ник + дата рождения (скобки если отсутствует)
     identifier = client.get('identifier', '')
     birthday = client.get('birthday', 'отсутствует')
     if not birthday: birthday = "отсутствует"
     text += f"{emoji['identifier']} <b>{identifier}</b> | <i>{birthday}</i>\n"
-    # Аккаунт + регион
     email = client.get('email', '')
     accpass = client.get('account_pass', '')
     region = client.get('region', '')
@@ -137,10 +135,8 @@ def format_info(client):
         elif region == "🇹🇷 Тур": reg_txt = "(тур)"
         else: reg_txt = "(другой)"
     text += f"{emoji['account']} {email};{accpass} {reg_txt}\n"
-    # Почта-пароль
     mailpass = client.get('mail_pass', '')
     text += f"{emoji['mailpass']} Почта-пароль: {mailpass}\n"
-    # Подписки
     sub1 = client.get('sub1_name', '')
     sub1_dur = client.get('sub1_duration', '')
     sub1_start = client.get('sub1_start', '')
@@ -158,7 +154,6 @@ def format_info(client):
         text += f"🗓️ {sub2_start} → {sub2_end}\n"
     if region:
         text += f"\n{emoji['region']} Регион: {reg_txt.replace('(','').replace(')','')}\n"
-    # Игры
     games = client.get('games', '')
     if games:
         games_list = [g.strip() for g in games.split(' —— ') if g.strip()]
@@ -178,7 +173,6 @@ def info_from_db_row(row):
 async def start_handler(message: types.Message, state: FSMContext):
     await state.finish()
     await message.answer(" ", reply_markup=build_main_menu())
-    # Сразу меню без текста.
 
 @dp.message_handler(lambda m: m.text == "➕ Добавить клиента")
 async def addclient_step1(message: types.Message, state: FSMContext):
@@ -383,7 +377,6 @@ async def addclient_sub1_start(message: types.Message, state: FSMContext):
     client['sub1_start'] = date
     client['sub1_end'] = calc_sub_end(date, client['sub1_duration'])
     await state.update_data(client=client)
-    # Если вторая подписка нужна
     sub1type = client.get('sub1_name', '')
     if sub1type in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
         await message.answer("<b>Шаг 5</b>\nВыбери вторую подписку (EA Play)", reply_markup=sub_type2_kb())
