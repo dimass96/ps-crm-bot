@@ -1,2 +1,2 @@
-pyTelegramBotAPI==4.14.1
+aiogram==2.25.2
 pyAesCrypt
