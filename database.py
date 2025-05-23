@@ -45,3 +45,6 @@ def delete_client(client_id):
     clients = [c for c in clients if c.get('id') != client_id]
     with open(DB_FILE, 'w', encoding='utf-8') as f:
         json.dump(clients, f, ensure_ascii=False, indent=2)
+
+def encrypt_db():
+    pass
