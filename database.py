@@ -1,151 +1,66 @@
-# database.py (полный, для ТЗ)
-
+import json
 import os
-import sqlite3
 import pyAesCrypt
 
-DB_FILENAME = 'clients.db'
-ENC_DB_FILENAME = 'clients_encrypted.db'
-PASSWORD = 'pscrm2024'
+DB_FILE = "clients.json"
+ENCRYPTED_DB_FILE = "clients_encrypted.db"
+BUFFER_SIZE = 64 * 1024
+PASSWORD = "pscrm2024"
+
+def save_client(client):
+    clients = []
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            try:
+                clients = json.load(f)
+            except Exception:
+                clients = []
+    # удаляем старого клиента по id, если такой уже есть
+    clients = [c for c in clients if c.get("id") != client.get("id")]
+    clients.append(client)
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(clients, f, ensure_ascii=False, indent=2)
+    encrypt_db()
+
+def load_clients():
+    if not os.path.exists(DB_FILE):
+        return []
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except Exception:
+            return []
 
 def encrypt_db():
-    if os.path.exists(DB_FILENAME):
-        pyAesCrypt.encryptFile(DB_FILENAME, ENC_DB_FILENAME, PASSWORD)
+    if os.path.exists(DB_FILE):
+        pyAesCrypt.encryptFile(DB_FILE, ENCRYPTED_DB_FILE, PASSWORD, BUFFER_SIZE)
 
 def decrypt_db():
-    if os.path.exists(ENC_DB_FILENAME):
-        pyAesCrypt.decryptFile(ENC_DB_FILENAME, DB_FILENAME, PASSWORD)
-
-def init_db():
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS clients (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            identifier TEXT,
-            identifier_type TEXT,
-            birthday TEXT,
-            email TEXT,
-            account_pass TEXT,
-            mail_pass TEXT,
-            console TEXT,
-            region TEXT,
-            reserve_codes_path TEXT,
-            sub1_name TEXT,
-            sub1_duration TEXT,
-            sub1_start TEXT,
-            sub1_end TEXT,
-            sub2_name TEXT,
-            sub2_duration TEXT,
-            sub2_start TEXT,
-            sub2_end TEXT,
-            games TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-    encrypt_db()
-
-def add_client(client):
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO clients (
-            identifier, identifier_type, birthday, email, account_pass, mail_pass,
-            console, region, reserve_codes_path,
-            sub1_name, sub1_duration, sub1_start, sub1_end,
-            sub2_name, sub2_duration, sub2_start, sub2_end,
-            games
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        client['identifier'],
-        client['identifier_type'],
-        client['birthday'],
-        client['email'],
-        client['account_pass'],
-        client['mail_pass'],
-        client['console'],
-        client['region'],
-        client['reserve_codes_path'],
-        client.get('sub1_name', ''),
-        client.get('sub1_duration', ''),
-        client.get('sub1_start', ''),
-        client.get('sub1_end', ''),
-        client.get('sub2_name', ''),
-        client.get('sub2_duration', ''),
-        client.get('sub2_start', ''),
-        client.get('sub2_end', ''),
-        client.get('games', '')
-    ))
-    conn.commit()
-    conn.close()
-    encrypt_db()
-
-def update_client(client_id, field, value):
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    cursor.execute(f'''
-        UPDATE clients SET {field} = ? WHERE id = ?
-    ''', (value, client_id))
-    conn.commit()
-    conn.close()
-    encrypt_db()
-
-def update_client_multi(client_id, data: dict):
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    for field, value in data.items():
-        cursor.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, client_id))
-    conn.commit()
-    conn.close()
-    encrypt_db()
-
-def get_client_by_identifier(identifier):
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM clients WHERE identifier = ?
-    ''', (identifier,))
-    row = cursor.fetchone()
-    conn.close()
-    encrypt_db()
-    return row
+    if os.path.exists(ENCRYPTED_DB_FILE):
+        pyAesCrypt.decryptFile(ENCRYPTED_DB_FILE, DB_FILE, PASSWORD, BUFFER_SIZE)
 
 def get_client_by_id(client_id):
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM clients WHERE id = ?
-    ''', (client_id,))
-    row = cursor.fetchone()
-    conn.close()
+    clients = load_clients()
+    for c in clients:
+        if c.get("id") == client_id:
+            return c
+    return None
+
+def update_client(client):
+    clients = load_clients()
+    for i, c in enumerate(clients):
+        if c.get("id") == client.get("id"):
+            clients[i] = client
+            break
+    else:
+        clients.append(client)
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(clients, f, ensure_ascii=False, indent=2)
     encrypt_db()
-    return row
 
 def delete_client(client_id):
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM clients WHERE id = ?', (client_id,))
-    conn.commit()
-    conn.close()
+    clients = load_clients()
+    clients = [c for c in clients if c.get("id") != client_id]
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(clients, f, ensure_ascii=False, indent=2)
     encrypt_db()
-
-def get_all_clients():
-    decrypt_db()
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM clients')
-    rows = cursor.fetchall()
-    conn.close()
-    encrypt_db()
-    return rows
-
-def save_reserve_codes(client_id, file_path):
-    update_client(client_id, 'reserve_codes_path', file_path)
