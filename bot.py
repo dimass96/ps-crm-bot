@@ -1,14 +1,13 @@
 import logging
 import os
-import shutil
-from aiogram import Bot, Dispatcher, types
+import asyncio
+from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
 from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from datetime import datetime
-from database import save_client
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from datetime import datetime, timedelta
+from database import save_client, get_clients, update_client, delete_client, get_client_by_id
 
 API_TOKEN = '7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8'
 ADMIN_ID = 350902460
@@ -19,348 +18,406 @@ storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 class AddClient(StatesGroup):
-    waiting_id = State()
-    waiting_birthday = State()
-    waiting_birthday_value = State()
-    waiting_account = State()
-    waiting_region = State()
-    waiting_sub_status = State()
-    waiting_sub_count = State()
-    waiting_sub1_type = State()
-    waiting_sub1_period = State()
-    waiting_sub1_start = State()
-    waiting_sub2_period = State()
-    waiting_sub2_start = State()
-    waiting_games_status = State()
-    waiting_games_value = State()
-    waiting_codes = State()
-    waiting_codes_upload = State()
+    phone = State()
+    dob = State()
+    account = State()
+    region = State()
+    subscription_exists = State()
+    subscription_count = State()
+    sub1_type = State()
+    sub1_period = State()
+    sub1_date = State()
+    sub2_type = State()
+    sub2_period = State()
+    sub2_date = State()
+    games_q = State()
+    games = State()
+    codes_q = State()
+    codes = State()
 
-main_menu_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-main_menu_kb.add(KeyboardButton("➕ Добавить клиента"))
-main_menu_kb.add(KeyboardButton("🔍 Найти клиента"))
+def main_menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton('➕ Добавить клиента'))
+    kb.add(KeyboardButton('🔍 Найти клиента'))
+    return kb
 
 def cancel_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("❌ Отмена"))
-    return kb
-
-def yes_no_kb():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Да"), KeyboardButton("Нет"))
-    kb.add(KeyboardButton("❌ Отмена"))
+    kb.add(KeyboardButton('❌ Отмена'))
     return kb
 
 def region_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("(укр)"), KeyboardButton("(тур)"), KeyboardButton("(другой)"))
-    kb.add(KeyboardButton("❌ Отмена"))
+    kb.add(KeyboardButton('(укр)'), KeyboardButton('(тур)'), KeyboardButton('(другой)'))
+    kb.add(KeyboardButton('❌ Отмена'))
+    return kb
+
+def yes_no_kb():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton('Да'), KeyboardButton('Нет'))
+    kb.add(KeyboardButton('❌ Отмена'))
     return kb
 
 def sub_count_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Одна"), KeyboardButton("Две"))
-    kb.add(KeyboardButton("❌ Отмена"))
+    kb.add(KeyboardButton('Одна'), KeyboardButton('Две'))
+    kb.add(KeyboardButton('❌ Отмена'))
     return kb
 
-def sub1_type_kb():
+def psplus_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("PS Plus Deluxe"), KeyboardButton("PS Plus Extra"), KeyboardButton("PS Plus Essential"))
-    kb.add(KeyboardButton("❌ Отмена"))
+    kb.add(KeyboardButton('PS Plus Deluxe'), KeyboardButton('PS Plus Extra'))
+    kb.add(KeyboardButton('PS Plus Essential'))
+    kb.add(KeyboardButton('❌ Отмена'))
     return kb
 
-def sub1_period_kb():
+def eaplay_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("1м"), KeyboardButton("3м"), KeyboardButton("12м"))
-    kb.add(KeyboardButton("❌ Отмена"))
+    kb.add(KeyboardButton('EA Play'))
+    kb.add(KeyboardButton('❌ Отмена'))
     return kb
 
-def sub2_period_kb():
+def sub_period_kb(periods):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("1м"), KeyboardButton("12м"))
-    kb.add(KeyboardButton("❌ Отмена"))
+    for p in periods:
+        kb.add(KeyboardButton(p))
+    kb.add(KeyboardButton('❌ Отмена'))
     return kb
 
-def edit_buttons():
+def edit_kb():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("🖲 Изменить номер", callback_data="edit_id"),
-        InlineKeyboardButton("📅 Изменить дату рождения", callback_data="edit_birthday"),
-        InlineKeyboardButton("🔑 Изменить аккаунт", callback_data="edit_account"),
-        InlineKeyboardButton("🌎 Изменить регион", callback_data="edit_region"),
-        InlineKeyboardButton("🖼 Изменить резерв коды", callback_data="edit_codes"),
-        InlineKeyboardButton("💳 Изменить подписку", callback_data="edit_sub"),
-        InlineKeyboardButton("🎮 Изменить игры", callback_data="edit_games"),
-        InlineKeyboardButton("✅ Сохранить", callback_data="save_confirm")
+        InlineKeyboardButton('📱 Изменить номер', callback_data='edit_phone'),
+        InlineKeyboardButton('📅 Изменить дату рождения', callback_data='edit_dob'),
+        InlineKeyboardButton('🔐 Изменить аккаунт', callback_data='edit_account'),
+        InlineKeyboardButton('🌍 Изменить регион', callback_data='edit_region'),
+        InlineKeyboardButton('🖼 Изменить резерв коды', callback_data='edit_codes'),
+        InlineKeyboardButton('💳 Изменить подписку', callback_data='edit_sub'),
+        InlineKeyboardButton('🎮 Изменить игры', callback_data='edit_games')
     )
+    kb.add(InlineKeyboardButton('✅ Сохранить', callback_data='save'))
     return kb
 
 async def clear_chat(chat_id):
-    async for m in bot.iter_chat_members(chat_id, 0):
-        pass
+    async for message in bot.iter_history(chat_id, limit=100):
+        try:
+            await bot.delete_message(chat_id, message.message_id)
+        except Exception:
+            continue
 
-def parse_account_data(raw):
-    lines = [l.strip() for l in raw.strip().split('\n') if l.strip()]
-    login = lines[0] if len(lines) > 0 else ""
-    password = lines[1] if len(lines) > 1 else ""
-    mailpass = lines[2] if len(lines) > 2 else ""
+def parse_account(text):
+    lines = text.strip().split('\n')
+    login = lines[0].strip() if len(lines) > 0 else ''
+    password = lines[1].strip() if len(lines) > 1 else ''
+    mailpass = lines[2].strip() if len(lines) > 2 else ''
     return login, password, mailpass
 
-def format_info(client):
-    parts = []
-    if client.get("codes_path"):
-        parts.append('🖼 <b>Резервные коды загружены</b>')
-    id_line = f'👤 <b>{client["id"]}</b>'
-    if client.get("birthday"):
-        id_line += f' | {client["birthday"]}'
-    else:
-        id_line += ' | отсутствует'
-    parts.append(id_line)
-    login, password, mailpass = parse_account_data(client.get("account", ""))
-    region = client.get("region", "")
-    acc_line = f'🔐 <b>{login}</b>; <b>{password}</b> {region}'
-    parts.append(acc_line)
+def format_client_info(client):
+    phone = client['phone']
+    dob = client.get('dob', 'отсутствует')
+    acc = client['login']
+    pas = client['password']
+    mailpass = client.get('mailpass', '')
+    region = client.get('region', '')
+    games = client.get('games', [])
+    sub1 = client.get('sub1', None)
+    sub2 = client.get('sub2', None)
+    codes_file_id = client.get('codes_file_id', None)
+
+    lines = []
+    lines.append(f"👤 <b>{phone}</b> | {dob}")
+    lines.append(f"🔐 <b>{acc}</b> ;{pas} {region}")
     if mailpass:
-        parts.append(f'✉️ Почта-пароль: <b>{mailpass}</b>')
-    if client.get("sub1"):
-        sub1 = client["sub1"]
-        parts.append(f'💳 {sub1["name"]} {sub1["period"]} {region}')
-        parts.append(f'🗓 {sub1["start"]} → {sub1["end"]}')
-    if client.get("sub2"):
-        sub2 = client["sub2"]
-        parts.append(f'💳 {sub2["name"]} {sub2["period"]} {region}')
-        parts.append(f'🗓 {sub2["start"]} → {sub2["end"]}')
-    if client.get("games"):
-        games = client["games"].split(' —— ')
-        if games and any(g.strip() for g in games):
-            games_list = "\n".join([f"• {g.strip()}" for g in games if g.strip()])
-            parts.append(f'🎮 Игры:\n{games_list}')
-    return "\n\n".join(parts)
+        lines.append(f"✉️ Почта-пароль: {mailpass}")
+    if sub1:
+        lines.append(f"💳 {sub1['type']} {sub1['period']} {region}")
+        lines.append(f"📅 {sub1['date_start']} → {sub1['date_end']}")
+    if sub2:
+        lines.append(f"💳 {sub2['type']} {sub2['period']} {region}")
+        lines.append(f"📅 {sub2['date_start']} → {sub2['date_end']}")
+    lines.append(f"🌍 Регион: {region}")
+    if games:
+        lines.append(f"🎮 Игры:\n" + '\n'.join([f"• {g}" for g in games]))
+    return '\n'.join(lines)
 
-def calculate_end_date(start, period):
-    dt = datetime.strptime(start, "%d.%m.%Y")
-    if period == "1м":
-        month = dt.month + 1
-        year = dt.year
-        if month > 12:
-            month -= 12
-            year += 1
-        end = dt.replace(month=month, year=year)
-    elif period == "3м":
-        month = dt.month + 3
-        year = dt.year
-        if month > 12:
-            month -= 12
-            year += 1
-        end = dt.replace(month=month, year=year)
-    elif period == "12м":
-        end = dt.replace(year=dt.year + 1)
-    else:
-        end = dt
-    return end.strftime("%d.%m.%Y")
-
-@dp.message_handler(commands=["start"])
+@dp.message_handler(commands=['start'])
 async def start_handler(message: types.Message, state: FSMContext):
     await state.finish()
-    await message.answer("Меню", reply_markup=main_menu_kb)
+    await message.answer("Выберите действие:", reply_markup=main_menu())
 
-@dp.message_handler(lambda m: m.text == "➕ Добавить клиента")
-async def add_client_start(message: types.Message, state: FSMContext):
+@dp.message_handler(lambda m: m.text == '➕ Добавить клиента')
+async def add_client(message: types.Message, state: FSMContext):
     await state.finish()
-    await state.update_data(new_client={})
-    await message.answer("Шаг 1\nНомер телефона или Telegram:", reply_markup=cancel_kb())
-    await AddClient.waiting_id.set()
+    await clear_chat(message.chat.id)
+    await message.answer('Шаг 1\nНомер телефона или Telegram:', reply_markup=cancel_kb())
+    await AddClient.phone.set()
 
-@dp.message_handler(lambda m: m.text == "❌ Отмена", state="*")
-async def cancel_handler(message: types.Message, state: FSMContext):
-    await state.finish()
-    await message.answer("Меню", reply_markup=main_menu_kb)
-
-@dp.message_handler(state=AddClient.waiting_id)
-async def step_id(message: types.Message, state: FSMContext):
-    await state.update_data(new_client={"id": message.text})
-    await message.answer("Шаг 2\nДата рождения?\n", reply_markup=yes_no_kb())
-    await AddClient.waiting_birthday.set()
-
-@dp.message_handler(state=AddClient.waiting_birthday)
-async def step_birthday(message: types.Message, state: FSMContext):
-    if message.text.lower() == "да":
-        await message.answer("Введите дату рождения (дд.мм.гггг):", reply_markup=cancel_kb())
-        await AddClient.waiting_birthday_value.set()
-    else:
-        data = await state.get_data()
-        client = data.get("new_client", {})
-        client["birthday"] = None
-        await state.update_data(new_client=client)
-        await message.answer("Шаг 3\nДанные от аккаунта:", reply_markup=cancel_kb())
-        await AddClient.waiting_account.set()
-
-@dp.message_handler(state=AddClient.waiting_birthday_value)
-async def step_birthday_value(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    client = data.get("new_client", {})
-    client["birthday"] = message.text
-    await state.update_data(new_client=client)
-    await message.answer("Шаг 3\nДанные от аккаунта:", reply_markup=cancel_kb())
-    await AddClient.waiting_account.set()
-
-@dp.message_handler(state=AddClient.waiting_account)
-async def step_account(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    client = data.get("new_client", {})
-    client["account"] = message.text
-    await state.update_data(new_client=client)
-    await message.answer("Шаг 4\nКакой регион аккаунта?", reply_markup=region_kb())
-    await AddClient.waiting_region.set()
-
-@dp.message_handler(state=AddClient.waiting_region)
-async def step_region(message: types.Message, state: FSMContext):
-    region = message.text.strip()
-    data = await state.get_data()
-    client = data.get("new_client", {})
-    client["region"] = region
-    await state.update_data(new_client=client)
-    await message.answer("Шаг 5\nОформлена ли подписка?", reply_markup=yes_no_kb())
-    await AddClient.waiting_sub_status.set()
-
-@dp.message_handler(state=AddClient.waiting_sub_status)
-async def step_sub_status(message: types.Message, state: FSMContext):
-    if message.text.lower() == "нет":
-        data = await state.get_data()
-        client = data.get("new_client", {})
-        client["sub1"] = None
-        client["sub2"] = None
-        await state.update_data(new_client=client)
-        await message.answer("Шаг 6\nОформлены игры?", reply_markup=yes_no_kb())
-        await AddClient.waiting_games_status.set()
-    else:
-        await message.answer("Сколько подписок?", reply_markup=sub_count_kb())
-        await AddClient.waiting_sub_count.set()
-
-@dp.message_handler(state=AddClient.waiting_sub_count)
-async def step_sub_count(message: types.Message, state: FSMContext):
-    await state.update_data(sub_count=message.text)
-    if message.text == "Одна":
-        await message.answer("Выберите подписку:", reply_markup=sub1_type_kb())
-        await AddClient.waiting_sub1_type.set()
-    elif message.text == "Две":
-        await message.answer("Какая первая подписка?", reply_markup=sub1_type_kb())
-        await AddClient.waiting_sub1_type.set()
-    else:
-        await message.answer("Выберите 'Одна' или 'Две'.", reply_markup=sub_count_kb())
-
-@dp.message_handler(state=AddClient.waiting_sub1_type)
-async def step_sub1_type(message: types.Message, state: FSMContext):
-    if message.text not in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
-        await message.answer("Выберите тип подписки.", reply_markup=sub1_type_kb())
+@dp.message_handler(state=AddClient.phone, content_types=types.ContentTypes.TEXT)
+async def add_client_phone(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
         return
-    await state.update_data(sub1_name=message.text)
-    await message.answer("Срок подписки?", reply_markup=sub1_period_kb())
-    await AddClient.waiting_sub1_period.set()
+    await state.update_data(phone=message.text.strip())
+    await message.answer('Шаг 2\nДата рождения\nЕсть дата рождения?', reply_markup=yes_no_kb())
+    await AddClient.dob.set()
 
-@dp.message_handler(state=AddClient.waiting_sub1_period)
-async def step_sub1_period(message: types.Message, state: FSMContext):
-    if message.text not in ["1м", "3м", "12м"]:
-        await message.answer("Выберите срок подписки.", reply_markup=sub1_period_kb())
+@dp.message_handler(state=AddClient.dob, content_types=types.ContentTypes.TEXT)
+async def add_client_dob(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
         return
-    await state.update_data(sub1_period=message.text)
-    await message.answer("Введите дату оформления первой подписки (дд.мм.гггг):", reply_markup=cancel_kb())
-    await AddClient.waiting_sub1_start.set()
-
-@dp.message_handler(state=AddClient.waiting_sub1_start)
-async def step_sub1_start(message: types.Message, state: FSMContext):
-    sub1_start = message.text
-    data = await state.get_data()
-    client = data.get("new_client", {})
-    sub1_name = data.get("sub1_name")
-    sub1_period = data.get("sub1_period")
-    region = client.get("region", "")
-    sub1_end = calculate_end_date(sub1_start, sub1_period)
-    client["sub1"] = {"name": sub1_name, "period": sub1_period, "region": region, "start": sub1_start, "end": sub1_end}
-    await state.update_data(new_client=client)
-    sub_count = data.get("sub_count")
-    if sub_count == "Две":
-        await message.answer("Вторая подписка — EA Play", reply_markup=sub2_period_kb())
-        await AddClient.waiting_sub2_period.set()
+    if message.text == 'Да':
+        await message.answer('Введите дату рождения (дд.мм.гггг):', reply_markup=cancel_kb())
     else:
-        await message.answer("Шаг 6\nОформлены игры?", reply_markup=yes_no_kb())
-        await AddClient.waiting_games_status.set()
-
-@dp.message_handler(state=AddClient.waiting_sub2_period)
-async def step_sub2_period(message: types.Message, state: FSMContext):
-    if message.text not in ["1м", "12м"]:
-        await message.answer("Выберите срок.", reply_markup=sub2_period_kb())
+        await state.update_data(dob='отсутствует')
+        await message.answer('Шаг 3\nДанные от аккаунта:', reply_markup=cancel_kb())
+        await AddClient.account.set()
         return
-    await state.update_data(sub2_period=message.text)
-    await message.answer("Введите дату оформления второй подписки (дд.мм.гггг):", reply_markup=cancel_kb())
-    await AddClient.waiting_sub2_start.set()
+    await AddClient.dob.set()
 
-@dp.message_handler(state=AddClient.waiting_sub2_start)
-async def step_sub2_start(message: types.Message, state: FSMContext):
-    sub2_start = message.text
-    data = await state.get_data()
-    client = data.get("new_client", {})
-    sub2_period = data.get("sub2_period")
-    region = client.get("region", "")
-    sub2_end = calculate_end_date(sub2_start, sub2_period)
-    client["sub2"] = {"name": "EA Play", "period": sub2_period, "region": region, "start": sub2_start, "end": sub2_end}
-    await state.update_data(new_client=client)
-    await message.answer("Шаг 6\nОформлены игры?", reply_markup=yes_no_kb())
-    await AddClient.waiting_games_status.set()
+@dp.message_handler(state=AddClient.dob, content_types=types.ContentTypes.TEXT)
+async def add_client_dob_input(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    await state.update_data(dob=message.text.strip())
+    await message.answer('Шаг 3\nДанные от аккаунта:', reply_markup=cancel_kb())
+    await AddClient.account.set()
 
-@dp.message_handler(state=AddClient.waiting_games_status)
-async def step_games_status(message: types.Message, state: FSMContext):
-    if message.text.lower() == "да":
-        await message.answer("Напиши какие игры (каждая на новой строке):", reply_markup=cancel_kb())
-        await AddClient.waiting_games_value.set()
+@dp.message_handler(state=AddClient.account, content_types=types.ContentTypes.TEXT)
+async def add_client_account(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    lines = message.text.strip().split('\n')
+    login = lines[0] if len(lines) > 0 else ''
+    password = lines[1] if len(lines) > 1 else ''
+    mailpass = lines[2] if len(lines) > 2 else ''
+    await state.update_data(login=login, password=password, mailpass=mailpass)
+    await message.answer('Шаг 4\nКакой регион аккаунта?', reply_markup=region_kb())
+    await AddClient.region.set()
+
+@dp.message_handler(state=AddClient.region, content_types=types.ContentTypes.TEXT)
+async def add_client_region(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    await state.update_data(region=message.text.strip())
+    await message.answer('Шаг 5\nОформлена ли подписка?', reply_markup=yes_no_kb())
+    await AddClient.subscription_exists.set()
+
+@dp.message_handler(state=AddClient.subscription_exists, content_types=types.ContentTypes.TEXT)
+async def add_client_subscription_exists(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    if message.text == 'Нет':
+        await state.update_data(sub1=None, sub2=None)
+        await message.answer('Шаг 6\nОформлены игры?', reply_markup=yes_no_kb())
+        await AddClient.games_q.set()
+        return
+    await message.answer('Одна или две подписки?', reply_markup=sub_count_kb())
+    await AddClient.subscription_count.set()
+
+@dp.message_handler(state=AddClient.subscription_count, content_types=types.ContentTypes.TEXT)
+async def add_client_subscription_count(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    if message.text == 'Одна':
+        await message.answer('Выберите подписку:', reply_markup=psplus_kb())
+        await AddClient.sub1_type.set()
+        await state.update_data(subs_total=1)
+    elif message.text == 'Две':
+        await message.answer('Шаг 5\nКакая первая подписка?', reply_markup=psplus_kb())
+        await AddClient.sub1_type.set()
+        await state.update_data(subs_total=2)
     else:
-        data = await state.get_data()
-        client = data.get("new_client", {})
-        client["games"] = ""
-        await state.update_data(new_client=client)
-        await message.answer("Шаг 7\nЕсть ли резервные коды?", reply_markup=yes_no_kb())
-        await AddClient.waiting_codes.set()
+        await message.answer('Пожалуйста, выбери вариант с клавиатуры.', reply_markup=sub_count_kb())
 
-@dp.message_handler(state=AddClient.waiting_games_value)
-async def step_games_value(message: types.Message, state: FSMContext):
-    games = " —— ".join([line.strip() for line in message.text.split('\n') if line.strip()])
-    data = await state.get_data()
-    client = data.get("new_client", {})
-    client["games"] = games
-    await state.update_data(new_client=client)
-    await message.answer("Шаг 7\nЕсть ли резервные коды?", reply_markup=yes_no_kb())
-    await AddClient.waiting_codes.set()
-
-@dp.message_handler(state=AddClient.waiting_codes)
-async def step_codes(message: types.Message, state: FSMContext):
-    if message.text.lower() == "да":
-        await message.answer("Загрузите скриншот с резервными кодами:", reply_markup=cancel_kb())
-        await AddClient.waiting_codes_upload.set()
+@dp.message_handler(state=AddClient.sub1_type, content_types=types.ContentTypes.TEXT)
+async def add_client_sub1_type(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    sub_type = message.text.strip()
+    await state.update_data(sub1_type=sub_type)
+    if sub_type in ['PS Plus Deluxe', 'PS Plus Extra', 'PS Plus Essential']:
+        await message.answer('Срок подписки?', reply_markup=sub_period_kb(['1м', '3м', '12м']))
     else:
-        data = await state.get_data()
-        client = data.get("new_client", {})
-        client["codes_path"] = None
-        await state.update_data(new_client=client)
-        await finish_adding_client(message, state)
+        await message.answer('Срок подписки?', reply_markup=sub_period_kb(['1м', '12м']))
+    await AddClient.sub1_period.set()
 
-@dp.message_handler(content_types=types.ContentType.PHOTO, state=AddClient.waiting_codes_upload)
-async def codes_upload(message: types.Message, state: FSMContext):
-    file = await message.photo[-1].download()
-    codes_path = f"codes/{file.filename}"
-    shutil.move(file.name, codes_path)
-    data = await state.get_data()
-    client = data.get("new_client", {})
-    client["codes_path"] = codes_path
-    await state.update_data(new_client=client)
-    await finish_adding_client(message, state)
+@dp.message_handler(state=AddClient.sub1_period, content_types=types.ContentTypes.TEXT)
+async def add_client_sub1_period(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    await state.update_data(sub1_period=message.text.strip())
+    await message.answer('Введите дату оформления первой подписки (дд.мм.гггг):', reply_markup=cancel_kb())
+    await AddClient.sub1_date.set()
 
-async def finish_adding_client(message, state: FSMContext):
+@dp.message_handler(state=AddClient.sub1_date, content_types=types.ContentTypes.TEXT)
+async def add_client_sub1_date(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    await state.update_data(sub1_date=message.text.strip())
     data = await state.get_data()
-    client = data.get("new_client", {})
+    if data.get('subs_total', 1) == 2:
+        await message.answer('Шаг 6\nКакая вторая подписка?', reply_markup=eaplay_kb())
+        await AddClient.sub2_type.set()
+    else:
+        await message.answer('Шаг 6\nОформлены игры?', reply_markup=yes_no_kb())
+        await AddClient.games_q.set()
+
+@dp.message_handler(state=AddClient.sub2_type, content_types=types.ContentTypes.TEXT)
+async def add_client_sub2_type(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    await state.update_data(sub2_type=message.text.strip())
+    await message.answer('Срок подписки?', reply_markup=sub_period_kb(['1м', '12м']))
+    await AddClient.sub2_period.set()
+
+@dp.message_handler(state=AddClient.sub2_period, content_types=types.ContentTypes.TEXT)
+async def add_client_sub2_period(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    await state.update_data(sub2_period=message.text.strip())
+    await message.answer('Введите дату оформления второй подписки (дд.мм.гггг):', reply_markup=cancel_kb())
+    await AddClient.sub2_date.set()
+
+@dp.message_handler(state=AddClient.sub2_date, content_types=types.ContentTypes.TEXT)
+async def add_client_sub2_date(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    await state.update_data(sub2_date=message.text.strip())
+    await message.answer('Шаг 7\nОформлены игры?', reply_markup=yes_no_kb())
+    await AddClient.games_q.set()
+
+@dp.message_handler(state=AddClient.games_q, content_types=types.ContentTypes.TEXT)
+async def add_client_games_q(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    if message.text == 'Да':
+        await message.answer('Напиши какие игры (каждая на новой строке):', reply_markup=cancel_kb())
+        await AddClient.games.set()
+    else:
+        await state.update_data(games=[])
+        await message.answer('Шаг 7\nЕсть ли резервные коды?', reply_markup=yes_no_kb())
+        await AddClient.codes_q.set()
+
+@dp.message_handler(state=AddClient.games, content_types=types.ContentTypes.TEXT)
+async def add_client_games(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    games = [x.strip() for x in message.text.split('\n') if x.strip()]
+    await state.update_data(games=games)
+    await message.answer('Шаг 7\nЕсть ли резервные коды?', reply_markup=yes_no_kb())
+    await AddClient.codes_q.set()
+
+@dp.message_handler(state=AddClient.codes_q, content_types=types.ContentTypes.TEXT)
+async def add_client_codes_q(message: types.Message, state: FSMContext):
+    if message.text == '❌ Отмена':
+        await state.finish()
+        await clear_chat(message.chat.id)
+        await message.answer('Отменено.', reply_markup=main_menu())
+        return
+    if message.text == 'Да':
+        await message.answer('Загрузите скриншот с резервными кодами:', reply_markup=cancel_kb())
+        await AddClient.codes.set()
+    else:
+        await state.update_data(codes_file_id=None)
+        await finish_add_client(message, state)
+
+@dp.message_handler(state=AddClient.codes, content_types=types.ContentTypes.PHOTO)
+async def add_client_codes(message: types.Message, state: FSMContext):
+    photo = message.photo[-1]
+    file_id = photo.file_id
+    await state.update_data(codes_file_id=file_id)
+    await finish_add_client(message, state)
+
+async def finish_add_client(message, state):
+    data = await state.get_data()
+    phone = data.get('phone', '')
+    dob = data.get('dob', 'отсутствует')
+    login = data.get('login', '')
+    password = data.get('password', '')
+    mailpass = data.get('mailpass', '')
+    region = data.get('region', '')
+    sub1 = None
+    sub2 = None
+    if data.get('sub1_type'):
+        period = data.get('sub1_period')
+        date_start = data.get('sub1_date')
+        months = int(period.replace('м', ''))
+        date_end = (datetime.strptime(date_start, "%d.%m.%Y") + timedelta(days=30*months)).strftime("%d.%m.%Y")
+        sub1 = {'type': data['sub1_type'], 'period': period, 'date_start': date_start, 'date_end': date_end}
+    if data.get('sub2_type'):
+        period = data.get('sub2_period')
+        date_start = data.get('sub2_date')
+        months = int(period.replace('м', ''))
+        date_end = (datetime.strptime(date_start, "%d.%m.%Y") + timedelta(days=30*months)).strftime("%d.%m.%Y")
+        sub2 = {'type': data['sub2_type'], 'period': period, 'date_start': date_start, 'date_end': date_end}
+    games = data.get('games', [])
+    codes_file_id = data.get('codes_file_id', None)
+    client = {
+        'phone': phone,
+        'dob': dob,
+        'login': login,
+        'password': password,
+        'mailpass': mailpass,
+        'region': region,
+        'sub1': sub1,
+        'sub2': sub2,
+        'games': games,
+        'codes_file_id': codes_file_id
+    }
     save_client(client)
-    await message.answer("✅ {} добавлен\n\n{}".format(client["id"], format_info(client)), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Изменить данные:", reply_markup=edit_buttons())
     await state.finish()
+    await clear_chat(message.chat.id)
+    msg = f'✅ <b>{phone}</b> добавлен\n\n' + format_client_info(client)
+    reply_markup = edit_kb()
+    sent_msg = await message.answer(msg, parse_mode='HTML', reply_markup=reply_markup)
+    if codes_file_id:
+        await message.answer_photo(codes_file_id)
+    await asyncio.sleep(300)
+    await bot.delete_message(sent_msg.chat.id, sent_msg.message_id)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
