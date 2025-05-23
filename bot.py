@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove, InputFile
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -513,11 +513,8 @@ async def step7_1(message: types.Message, state: FSMContext):
     else:
         await message.answer("Выберите Есть или Нету.", reply_markup=get_yesno_kb())
 
-@dp.message(AddClient.step_7, content_types=types.ContentType.PHOTO)
+@dp.message(AddClient.step_7, F.photo)
 async def step7_codes(message: types.Message, state: FSMContext):
-    if not message.photo:
-        await message.answer("Отправьте именно фото.", reply_markup=get_cancel_kb())
-        return
     file_id = message.photo[-1].file_id
     await state.update_data(codes=file_id)
     await save_and_finish(message, state)
