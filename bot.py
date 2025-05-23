@@ -1,16 +1,15 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.utils import executor
-from database import save_client, encrypt_db
+from database import save_client
 from datetime import datetime
 import os
 
 TOKEN = '7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8'
-ADMIN_ID = 350902460
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
@@ -101,29 +100,29 @@ def build_main_menu():
     kb.add(KeyboardButton('➕ Добавить клиента'), KeyboardButton('🔍 Найти клиента'))
     return kb
 
-async def clear_chat(chat_id):
-    async for msg in bot.iter_history(chat_id, limit=100):
+async def clear_last_messages(chat_id, bot, message_id, count=15):
+    for msg_id in range(message_id, message_id - count, -1):
         try:
-            await bot.delete_message(chat_id, msg.message_id)
+            await bot.delete_message(chat_id, msg_id)
         except:
             pass
 
 @dp.message_handler(commands=['start'])
 async def start_handler(message: types.Message, state: FSMContext):
     await state.finish()
-    await clear_chat(message.chat.id)
+    await clear_last_messages(message.chat.id, bot, message.message_id)
     await message.answer('Меню', reply_markup=build_main_menu())
 
 @dp.message_handler(lambda m: m.text == 'Меню')
 async def main_menu(message: types.Message, state: FSMContext):
     await state.finish()
-    await clear_chat(message.chat.id)
+    await clear_last_messages(message.chat.id, bot, message.message_id)
     await message.answer('Меню', reply_markup=build_main_menu())
 
 @dp.message_handler(lambda m: m.text == '➕ Добавить клиента')
 async def add_client_start(message: types.Message, state: FSMContext):
     await state.finish()
-    await clear_chat(message.chat.id)
+    await clear_last_messages(message.chat.id, bot, message.message_id)
     await message.answer('Шаг 1\nНомер телефона или Telegram:', reply_markup=get_cancel_kb())
     await AddClient.step1_id.set()
 
@@ -298,7 +297,7 @@ async def addclient_sub1_date(message: types.Message, state: FSMContext):
     subs.append(sub1)
     await state.update_data(subs=subs)
     if len(subs) == 1 and sub1_type in ['PS Plus Deluxe', 'PS Plus Extra', 'PS Plus Essential']:
-        await message.answer('Шаг 6\nКакая вторая подписка?', reply_markup=get_eaplay_type_kb())
+        await message.answer('Шаг 5\nКакая вторая подписка?', reply_markup=get_eaplay_type_kb())
         await AddClient.step5_sub2_type.set()
     else:
         client = data.get('client', {})
@@ -343,7 +342,7 @@ async def addclient_sub2_date(message: types.Message, state: FSMContext):
     client = data.get('client', {})
     client['subs'] = subs
     await state.update_data(client=client)
-    await message.answer('Шаг 7\nОформлены игры?', reply_markup=get_yesno_kb())
+    await message.answer('Шаг 6\nОформлены игры?', reply_markup=get_yesno_kb())
     await AddClient.step6_games_choice.set()
 
 @dp.message_handler(state=AddClient.step6_games_choice)
@@ -352,14 +351,14 @@ async def addclient_games_choice(message: types.Message, state: FSMContext):
         await cancel_add(message, state)
         return
     if message.text == 'Да':
-        await message.answer('Напиши какие игры:', reply_markup=get_cancel_kb())
+        await message.answer('Напиши какие игры (каждая игра с новой строки):', reply_markup=get_cancel_kb())
         await AddClient.step6_games.set()
     elif message.text == 'Нет':
         data = await state.get_data()
         client = data.get('client', {})
         client['games'] = []
         await state.update_data(client=client)
-        await message.answer('Есть ли резервные коды?', reply_markup=get_yesno_kb())
+        await message.answer('Шаг 7\nЕсть резерв коды?', reply_markup=get_yesno_kb())
         await AddClient.step7_reserve_choice.set()
     else:
         await message.answer('Выберите Да или Нет.', reply_markup=get_yesno_kb())
@@ -374,7 +373,7 @@ async def addclient_games(message: types.Message, state: FSMContext):
     client = data.get('client', {})
     client['games'] = games
     await state.update_data(client=client)
-    await message.answer('Есть ли резервные коды?', reply_markup=get_yesno_kb())
+    await message.answer('Шаг 7\nЕсть резерв коды?', reply_markup=get_yesno_kb())
     await AddClient.step7_reserve_choice.set()
 
 @dp.message_handler(state=AddClient.step7_reserve_choice)
@@ -383,7 +382,7 @@ async def addclient_reserve_choice(message: types.Message, state: FSMContext):
         await cancel_add(message, state)
         return
     if message.text == 'Да':
-        await message.answer('Загрузите скриншот с резервными кодами:', reply_markup=get_cancel_kb())
+        await message.answer('Загрузите скриншот с кодами:', reply_markup=get_cancel_kb())
         await AddClient.step7_reserve_upload.set()
     elif message.text == 'Нет':
         data = await state.get_data()
@@ -406,7 +405,7 @@ async def addclient_reserve_upload(message: types.Message, state: FSMContext):
 @dp.message_handler(lambda m: m.text == '❌ Отмена', state='*')
 async def cancel_add(message: types.Message, state: FSMContext):
     await state.finish()
-    await clear_chat(message.chat.id)
+    await clear_last_messages(message.chat.id, bot, message.message_id)
     await message.answer('Добавление отменено.', reply_markup=build_main_menu())
 
 def format_client_info(client):
@@ -428,30 +427,28 @@ def format_client_info(client):
                     months = int(sub['term'].replace('м',''))
                     if months == 12:
                         months = 12
-                    end = start.replace(year=start.year + months // 12, month=(start.month + months - 1) % 12 + 1)
-                    end = end.replace(day=start.day)
+                    end_month = start.month + months
+                    end_year = start.year
+                    while end_month > 12:
+                        end_month -= 12
+                        end_year += 1
+                    end = start.replace(year=end_year, month=end_month)
                     s += f"\n{start.strftime('%d.%m.%Y')} → {end.strftime('%d.%m.%Y')}"
             subs_lines.append(s)
     region = client.get('region', '')
-    if region:
-        region_line = f"Регион: {region}"
-    else:
-        region_line = ''
     games_lines = "\n".join(['• ' + g for g in client.get('games', [])]) if client.get('games') else ''
     text = f"{id_line}\n{login_line}{mail_line}"
     if subs_lines:
         text += '\n\n' + '\n\n'.join(subs_lines)
-    if region_line:
-        text += f"\n{region_line}"
     if games_lines:
         text += f"\n\n🎮 Игры:\n{games_lines}"
     return text
 
-async def finish_add(message, state):
+async def finish_add(message, state: FSMContext):
     data = await state.get_data()
     client = data.get('client', {})
     save_client(client)
-    await clear_chat(message.chat.id)
+    await clear_last_messages(message.chat.id, bot, message.message_id)
     await message.answer(f"✅ {client['id']} добавлен\n\n{format_client_info(client)}", reply_markup=get_edit_kb())
     await state.finish()
 
