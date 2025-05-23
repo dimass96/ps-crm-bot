@@ -9,42 +9,43 @@ def load_clients():
     with open(DB_FILE, 'r', encoding='utf-8') as f:
         try:
             return json.load(f)
-        except:
+        except Exception:
             return []
+
+def save_clients(clients):
+    with open(DB_FILE, 'w', encoding='utf-8') as f:
+        json.dump(clients, f, ensure_ascii=False, indent=2)
 
 def save_client(client):
     clients = load_clients()
     for i, c in enumerate(clients):
-        if c.get("id") == client.get("id"):
+        if c['phone'] == client['phone']:
             clients[i] = client
-            break
-    else:
-        clients.append(client)
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
+            save_clients(clients)
+            return
+    clients.append(client)
+    save_clients(clients)
 
-def find_client_by_id(client_id):
+def get_clients():
+    return load_clients()
+
+def get_client_by_id(identifier):
     clients = load_clients()
     for c in clients:
-        if c.get('id') == client_id:
+        if c['phone'] == identifier:
             return c
     return None
 
-def update_client(client_id, updated_data):
+def update_client(identifier, new_data):
     clients = load_clients()
     for i, c in enumerate(clients):
-        if c.get('id') == client_id:
-            clients[i].update(updated_data)
-            with open(DB_FILE, 'w', encoding='utf-8') as f:
-                json.dump(clients, f, ensure_ascii=False, indent=2)
+        if c['phone'] == identifier:
+            clients[i].update(new_data)
+            save_clients(clients)
             return True
     return False
 
-def delete_client(client_id):
+def delete_client(identifier):
     clients = load_clients()
-    clients = [c for c in clients if c.get('id') != client_id]
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
-
-def encrypt_db():
-    pass
+    clients = [c for c in clients if c['phone'] != identifier]
+    save_clients(clients)
