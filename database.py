@@ -1,110 +1,151 @@
+# database.py (полный, для ТЗ)
+
+import os
 import sqlite3
 import pyAesCrypt
-import os
 
-DB_FILE = 'clients.db'
-ENC_DB_FILE = 'clients_encrypted.db'
-DB_PASS = 'pscrm2024'
-BUFFER_SIZE = 64 * 1024
+DB_FILENAME = 'clients.db'
+ENC_DB_FILENAME = 'clients_encrypted.db'
+PASSWORD = 'pscrm2024'
+
+def encrypt_db():
+    if os.path.exists(DB_FILENAME):
+        pyAesCrypt.encryptFile(DB_FILENAME, ENC_DB_FILENAME, PASSWORD)
+
+def decrypt_db():
+    if os.path.exists(ENC_DB_FILENAME):
+        pyAesCrypt.decryptFile(ENC_DB_FILENAME, DB_FILENAME, PASSWORD)
 
 def init_db():
-    if not os.path.exists(DB_FILE):
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('''
-        CREATE TABLE clients (
+    decrypt_db()
+    conn = sqlite3.connect(DB_FILENAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             identifier TEXT,
             identifier_type TEXT,
-            birth_date TEXT,
+            birthday TEXT,
             email TEXT,
-            acc_pass TEXT,
+            account_pass TEXT,
             mail_pass TEXT,
-            consoles TEXT,
+            console TEXT,
             region TEXT,
             reserve_codes_path TEXT,
-            subs_data TEXT,
+            sub1_name TEXT,
+            sub1_duration TEXT,
+            sub1_start TEXT,
+            sub1_end TEXT,
+            sub2_name TEXT,
+            sub2_duration TEXT,
+            sub2_start TEXT,
+            sub2_end TEXT,
             games TEXT
         )
-        ''')
-        conn.commit()
-        conn.close()
-        with open(DB_FILE, 'rb') as fIn:
-            with open(ENC_DB_FILE, 'wb') as fOut:
-                pyAesCrypt.encryptStream(fIn, fOut, DB_PASS, BUFFER_SIZE)
-    else:
-        if not os.path.exists(DB_FILE) and os.path.exists(ENC_DB_FILE):
-            with open(ENC_DB_FILE, 'rb') as fIn:
-                with open(DB_FILE, 'wb') as fOut:
-                    pyAesCrypt.decryptStream(fIn, fOut, DB_PASS, BUFFER_SIZE, os.path.getsize(ENC_DB_FILE))
+    ''')
+    conn.commit()
+    conn.close()
+    encrypt_db()
 
-def save_and_encrypt_db():
-    with open(DB_FILE, 'rb') as fIn:
-        with open(ENC_DB_FILE, 'wb') as fOut:
-            pyAesCrypt.encryptStream(fIn, fOut, DB_PASS, BUFFER_SIZE)
-
-def decrypt_db():
-    with open(ENC_DB_FILE, 'rb') as fIn:
-        with open(DB_FILE, 'wb') as fOut:
-            pyAesCrypt.decryptStream(fIn, fOut, DB_PASS, BUFFER_SIZE, os.path.getsize(ENC_DB_FILE))
-
-def add_client(data):
+def add_client(client):
     decrypt_db()
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILENAME)
     cursor = conn.cursor()
     cursor.execute('''
-    INSERT INTO clients (identifier, identifier_type, birth_date, email, acc_pass, mail_pass, consoles, region, reserve_codes_path, subs_data, games)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO clients (
+            identifier, identifier_type, birthday, email, account_pass, mail_pass,
+            console, region, reserve_codes_path,
+            sub1_name, sub1_duration, sub1_start, sub1_end,
+            sub2_name, sub2_duration, sub2_start, sub2_end,
+            games
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        data['identifier'], data['identifier_type'], data['birth_date'],
-        data['email'], data['acc_pass'], data['mail_pass'],
-        data['consoles'], data['region'], data.get('reserve_codes_path', None),
-        data['subs_data'], data['games']
+        client['identifier'],
+        client['identifier_type'],
+        client['birthday'],
+        client['email'],
+        client['account_pass'],
+        client['mail_pass'],
+        client['console'],
+        client['region'],
+        client['reserve_codes_path'],
+        client.get('sub1_name', ''),
+        client.get('sub1_duration', ''),
+        client.get('sub1_start', ''),
+        client.get('sub1_end', ''),
+        client.get('sub2_name', ''),
+        client.get('sub2_duration', ''),
+        client.get('sub2_start', ''),
+        client.get('sub2_end', ''),
+        client.get('games', '')
     ))
     conn.commit()
     conn.close()
-    save_and_encrypt_db()
+    encrypt_db()
 
-def update_client(client_id, data):
+def update_client(client_id, field, value):
     decrypt_db()
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILENAME)
     cursor = conn.cursor()
-    cursor.execute('''
-    UPDATE clients SET identifier=?, identifier_type=?, birth_date=?, email=?, acc_pass=?, mail_pass=?, consoles=?, region=?, reserve_codes_path=?, subs_data=?, games=?
-    WHERE id=?
-    ''', (
-        data['identifier'], data['identifier_type'], data['birth_date'],
-        data['email'], data['acc_pass'], data['mail_pass'],
-        data['consoles'], data['region'], data.get('reserve_codes_path', None),
-        data['subs_data'], data['games'], client_id
-    ))
+    cursor.execute(f'''
+        UPDATE clients SET {field} = ? WHERE id = ?
+    ''', (value, client_id))
     conn.commit()
     conn.close()
-    save_and_encrypt_db()
+    encrypt_db()
+
+def update_client_multi(client_id, data: dict):
+    decrypt_db()
+    conn = sqlite3.connect(DB_FILENAME)
+    cursor = conn.cursor()
+    for field, value in data.items():
+        cursor.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, client_id))
+    conn.commit()
+    conn.close()
+    encrypt_db()
 
 def get_client_by_identifier(identifier):
     decrypt_db()
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILENAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM clients WHERE identifier=?", (identifier,))
+    cursor.execute('''
+        SELECT * FROM clients WHERE identifier = ?
+    ''', (identifier,))
     row = cursor.fetchone()
     conn.close()
+    encrypt_db()
     return row
 
 def get_client_by_id(client_id):
     decrypt_db()
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILENAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM clients WHERE id=?", (client_id,))
+    cursor.execute('''
+        SELECT * FROM clients WHERE id = ?
+    ''', (client_id,))
     row = cursor.fetchone()
     conn.close()
+    encrypt_db()
     return row
 
 def delete_client(client_id):
     decrypt_db()
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILENAME)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM clients WHERE id=?", (client_id,))
+    cursor.execute('DELETE FROM clients WHERE id = ?', (client_id,))
     conn.commit()
     conn.close()
-    save_and_encrypt_db()
+    encrypt_db()
+
+def get_all_clients():
+    decrypt_db()
+    conn = sqlite3.connect(DB_FILENAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM clients')
+    rows = cursor.fetchall()
+    conn.close()
+    encrypt_db()
+    return rows
+
+def save_reserve_codes(client_id, file_path):
+    update_client(client_id, 'reserve_codes_path', file_path)
