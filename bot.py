@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -30,8 +30,8 @@ class AddClient(StatesGroup):
     step_5_sub8 = State()
     step_6 = State()
     step_6_games = State()
-    step_7 = State()
     step_7_1 = State()
+    step_7 = State()
 
 def load_db():
     if not os.path.exists(DB_PATH):
@@ -392,17 +392,19 @@ async def step5_sub8(message: types.Message, state: FSMContext):
 
 @dp.message(AddClient.step_7)
 async def step7(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel(message, state)
-        return
-    term_or_date = message.text.strip()
     data = await state.get_data()
-    # Если мы ждем срок второй подписки
     if "second_sub_term" not in data:
-        await state.update_data(second_sub_term=term_or_date)
+        if message.text == "❌ Отмена":
+            await cancel(message, state)
+            return
+        term = message.text.strip()
+        await state.update_data(second_sub_term=term)
         await message.answer("Дата оформления второй подписки? (дд.мм.гггг):", reply_markup=get_cancel_kb())
     else:
-        date = term_or_date
+        if message.text == "❌ Отмена":
+            await cancel(message, state)
+            return
+        date = message.text.strip()
         try:
             datetime.strptime(date, "%d.%m.%Y")
         except Exception:
@@ -471,6 +473,10 @@ async def step7_codes(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     await state.update_data(codes=file_id)
     await save_and_finish(message, state)
+
+@dp.message(AddClient.step_7)
+async def step7_wait_photo(message: types.Message, state: FSMContext):
+    await message.answer("Отправьте скриншот с резервными кодами или нажмите ❌ Отмена.", reply_markup=get_cancel_kb())
 
 async def save_and_finish(message, state: FSMContext):
     data = await state.get_data()
