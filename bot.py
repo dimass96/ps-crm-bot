@@ -32,7 +32,6 @@ class AddClient(StatesGroup):
     step_6_games = State()
     step_7_1 = State()
     step_7_photo = State()
-    # edit states
     edit_number = State()
     edit_birthdate = State()
     edit_account = State()
@@ -40,6 +39,9 @@ class AddClient(StatesGroup):
     edit_codes = State()
     edit_subscription = State()
     edit_games = State()
+
+class SearchClient(StatesGroup):
+    waiting_for_query = State()
 
 def load_db():
     if not os.path.exists(DB_PATH):
@@ -184,7 +186,6 @@ dp = Dispatcher(storage=storage)
 
 async def clear_chat(chat_id, state: FSMContext):
     await state.clear()
-    # Удалить последние 30 сообщений (ограничение Telegram)
     try:
         async for msg in bot.get_chat_history(chat_id, limit=30):
             try:
@@ -217,9 +218,9 @@ async def add_client(message: types.Message, state: FSMContext):
 async def search_client(message: types.Message, state: FSMContext):
     await clear_chat(message.chat.id, state)
     await message.answer("Введите номер или Telegram клиента:", reply_markup=get_cancel_kb())
-    await state.set_state("searching")
+    await state.set_state(SearchClient.waiting_for_query)
 
-@dp.message(state="searching")
+@dp.message(SearchClient.waiting_for_query)
 async def searching(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await cancel(message, state)
@@ -553,8 +554,6 @@ async def save_and_finish(message, state: FSMContext, client_data=None, edit_idx
         await asyncio.sleep(300)
         await message.delete()
 
-# --------------- EDIT CALLBACKS ---------------
-
 @dp.callback_query(F.data.startswith("edit_"))
 async def process_edit_callbacks(call: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -681,14 +680,7 @@ async def edit_games(message: types.Message, state: FSMContext):
     await clear_chat(message.chat.id, state)
     await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
 
-# Для подписки (реюз шагов добавления, но с обновлением client_edit)
-@dp.message(AddClient.edit_subscription)
-async def edit_subscription_start(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel(message, state)
-        return
-    # Дальше логика копирует шаги добавления подписки — либо одну, либо две — обновляя client_edit["subscriptions"]
-    # Здесь же можно вызвать любые подэтапы как в add_client, просто используй временно FSM для этого шага, и после сохранить client_edit
+# edit_subscription шаги при необходимости реализовать аналогично добавлению — или вставить как есть из add_client
 
 if __name__ == "__main__":
     import logging
