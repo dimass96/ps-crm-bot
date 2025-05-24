@@ -194,6 +194,11 @@ async def clear_chat(chat_id, state: FSMContext, keep=None):
     except:
         pass
 
+@dp.message(lambda m: m.text == "❌ Отмена")
+async def cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await clear_chat(message.chat.id, state)
+
 async def show_client_card(chat_id, client, state, edit_keyboard=True):
     text = make_client_block(client)
     msgs = []
@@ -213,11 +218,6 @@ async def start_cmd(message: types.Message, state: FSMContext):
         return
     await clear_chat(message.chat.id, state)
     await message.answer("Выберите действие:", reply_markup=get_main_menu())
-
-@dp.message(lambda m: m.text == "❌ Отмена")
-async def cancel(message: types.Message, state: FSMContext):
-    await clear_chat(message.chat.id, state)
-    await message.answer("Действие отменено.", reply_markup=get_main_menu())
 
 @dp.message(lambda m: m.text == "➕ Добавить клиента")
 async def add_client(message: types.Message, state: FSMContext):
@@ -252,11 +252,9 @@ async def step1(message: types.Message, state: FSMContext):
         return
     value = message.text.strip()
     if value.startswith("@"):
-        await state.update_data(telegram=value)
-        await state.update_data(number="")
+        await state.update_data(telegram=value, number="")
     else:
-        await state.update_data(number=value)
-        await state.update_data(telegram="")
+        await state.update_data(number=value, telegram="")
     await state.set_state(AddClient.step_2)
     kb = [
         [KeyboardButton(text="Есть"), KeyboardButton(text="Нету")],
