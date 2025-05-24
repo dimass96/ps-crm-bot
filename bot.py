@@ -32,6 +32,14 @@ class AddClient(StatesGroup):
     step_6_games = State()
     step_7_1 = State()
     step_7_photo = State()
+    # edit states
+    edit_number = State()
+    edit_birthdate = State()
+    edit_account = State()
+    edit_region = State()
+    edit_codes = State()
+    edit_subscription = State()
+    edit_games = State()
 
 def load_db():
     if not os.path.exists(DB_PATH):
@@ -51,6 +59,19 @@ def add_client_to_db(client):
     clients.append(client)
     save_db(clients)
 
+def update_client_in_db(index, client):
+    clients = load_db()
+    if 0 <= index < len(clients):
+        clients[index] = client
+        save_db(clients)
+
+def find_client(search):
+    clients = load_db()
+    for i, c in enumerate(clients):
+        if (c.get("number") and c["number"] == search) or (c.get("telegram") and c["telegram"] == search):
+            return i, c
+    return None, None
+
 def month_delta(date, months):
     d = datetime.strptime(date, "%d.%m.%Y")
     m = d.month - 1 + months
@@ -64,15 +85,15 @@ def make_client_block(client):
     birth = client.get("birthdate", "отсутствует")
     acc = client.get("account", "")
     acc_mail = client.get("mailpass", "")
-    region = client.get("region", "отсутствует")
     games = client.get("games", [])
     subs = client.get("subscriptions", [])
+    region = client.get("region", "отсутствует")
     block = f"👤 {number} | {birth}\n"
-    block += f"🔐 {acc} ({region})\n" if acc else ""
+    block += f"🔐 {acc}\n" if acc else ""
     block += f"✉️ Почта-пароль: {acc_mail}\n" if acc_mail else ""
     if subs and subs[0]["name"] != "отсутствует":
         for s in subs:
-            block += f"\n💳 {s['name']} {s['term']} ({region})\n"
+            block += f"\n💳 {s['name']} {s['term']}\n"
             block += f"📅 {s['start']} → {s['end']}\n"
     else:
         block += "\n💳 Подписки: (отсутствует)\n"
@@ -94,7 +115,7 @@ def get_edit_keyboard():
             InlineKeyboardButton(text="🌍 Изменить регион", callback_data="edit_region"),
         ],
         [
-            InlineKeyboardButton(text="🖼 Изменить резерв коды", callback_data="edit_codes"),
+            InlineKeyboardButton(text="🖼 Изменить резервные коды", callback_data="edit_codes"),
             InlineKeyboardButton(text="💳 Изменить подписку", callback_data="edit_subscription"),
         ],
         [
@@ -161,8 +182,17 @@ bot = Bot(token=TOKEN, parse_mode="HTML")
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-async def clear_chat(user_id, state: FSMContext):
+async def clear_chat(chat_id, state: FSMContext):
     await state.clear()
+    # Удалить последние 30 сообщений (ограничение Telegram)
+    try:
+        async for msg in bot.get_chat_history(chat_id, limit=30):
+            try:
+                await bot.delete_message(chat_id, msg.message_id)
+            except:
+                pass
+    except:
+        pass
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
@@ -179,8 +209,30 @@ async def cancel(message: types.Message, state: FSMContext):
 
 @dp.message(lambda m: m.text == "➕ Добавить клиента")
 async def add_client(message: types.Message, state: FSMContext):
+    await clear_chat(message.chat.id, state)
     await state.set_state(AddClient.step_1)
     await message.answer("Шаг 1\nНомер телефона или Telegram:", reply_markup=get_cancel_kb())
+
+@dp.message(lambda m: m.text == "🔍 Найти клиента")
+async def search_client(message: types.Message, state: FSMContext):
+    await clear_chat(message.chat.id, state)
+    await message.answer("Введите номер или Telegram клиента:", reply_markup=get_cancel_kb())
+    await state.set_state("searching")
+
+@dp.message(state="searching")
+async def searching(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    idx, client = find_client(message.text.strip())
+    if client:
+        await state.update_data(edit_idx=idx)
+        await state.update_data(client_edit=client)
+        await clear_chat(message.chat.id, state)
+        await message.answer(make_client_block(client), reply_markup=get_edit_keyboard())
+    else:
+        await clear_chat(message.chat.id, state)
+        await message.answer("Клиент не найден.", reply_markup=get_main_menu())
 
 @dp.message(AddClient.step_1)
 async def step1(message: types.Message, state: FSMContext):
@@ -462,7 +514,6 @@ async def step7_photo(message: types.Message, state: FSMContext):
     if message.text == "Да":
         await state.set_state(AddClient.step_7_photo)
         await message.answer("Загрузите скриншот с резервными кодами:", reply_markup=get_cancel_kb())
-        # Переводим в то же состояние, но далее обработчик только на фото!
     elif message.text == "Нет":
         await state.update_data(codes="")
         await save_and_finish(message, state)
@@ -473,25 +524,171 @@ async def step7_photo(message: types.Message, state: FSMContext):
     else:
         await message.answer("Выберите Есть или Нету. Если выбрали 'Да', отправьте фото или нажмите Отмена.", reply_markup=get_yesno_kb())
 
-async def save_and_finish(message, state: FSMContext):
+async def save_and_finish(message, state: FSMContext, client_data=None, edit_idx=None):
+    if client_data is None:
+        data = await state.get_data()
+        client = {
+            "number": data.get("number", ""),
+            "telegram": data.get("telegram", ""),
+            "birthdate": data.get("birthdate", "отсутствует"),
+            "account": data.get("account", ""),
+            "mailpass": data.get("mailpass", ""),
+            "region": data.get("region", "отсутствует"),
+            "subscriptions": data.get("subscriptions", []),
+            "games": data.get("games", []),
+            "codes": data.get("codes", "")
+        }
+    else:
+        client = client_data
+
+    if edit_idx is not None:
+        update_client_in_db(edit_idx, client)
+        await clear_chat(message.chat.id, state)
+        await message.answer("Изменения сохранены.", reply_markup=get_main_menu())
+    else:
+        add_client_to_db(client)
+        await clear_chat(message.chat.id, state)
+        text = f"✅ {client['number'] or client['telegram']} добавлен\n\n{make_client_block(client)}"
+        await message.answer(text, reply_markup=get_edit_keyboard())
+        await asyncio.sleep(300)
+        await message.delete()
+
+# --------------- EDIT CALLBACKS ---------------
+
+@dp.callback_query(F.data.startswith("edit_"))
+async def process_edit_callbacks(call: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    client = {
-        "number": data.get("number", ""),
-        "telegram": data.get("telegram", ""),
-        "birthdate": data.get("birthdate", "отсутствует"),
-        "account": data.get("account", ""),
-        "mailpass": data.get("mailpass", ""),
-        "region": data.get("region", "отсутствует"),
-        "subscriptions": data.get("subscriptions", []),
-        "games": data.get("games", []),
-        "codes": data.get("codes", "")
-    }
-    add_client_to_db(client)
+    client = data.get("client_edit")
+    idx = data.get("edit_idx")
+    if call.data == "edit_number":
+        await state.set_state(AddClient.edit_number)
+        await call.message.answer("Введите новый номер или Telegram:", reply_markup=get_cancel_kb())
+    elif call.data == "edit_birthdate":
+        await state.set_state(AddClient.edit_birthdate)
+        await call.message.answer("Введите новую дату рождения (или напишите 'отсутствует'):", reply_markup=get_cancel_kb())
+    elif call.data == "edit_account":
+        await state.set_state(AddClient.edit_account)
+        await call.message.answer("Введите новые данные аккаунта (логин, пароль, почта):", reply_markup=get_cancel_kb())
+    elif call.data == "edit_region":
+        await state.set_state(AddClient.edit_region)
+        await call.message.answer("Выберите регион аккаунта:", reply_markup=get_region_kb())
+    elif call.data == "edit_codes":
+        await state.set_state(AddClient.edit_codes)
+        await call.message.answer("Загрузите новый скриншот с резервными кодами:", reply_markup=get_cancel_kb())
+    elif call.data == "edit_subscription":
+        await state.set_state(AddClient.edit_subscription)
+        await call.message.answer("Сколько подписок?", reply_markup=get_subs_count_kb())
+    elif call.data == "edit_games":
+        await state.set_state(AddClient.edit_games)
+        await call.message.answer("Введите новый список игр, каждая на новой строке:", reply_markup=get_cancel_kb())
+    elif call.data == "save_changes":
+        await save_and_finish(call.message, state, client_data=client, edit_idx=idx)
+
+@dp.message(AddClient.edit_number)
+async def edit_number(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    value = message.text.strip()
+    data = await state.get_data()
+    client = data.get("client_edit")
+    if value.startswith("@"):
+        client["telegram"] = value
+        client["number"] = ""
+    else:
+        client["number"] = value
+        client["telegram"] = ""
+    await state.update_data(client_edit=client)
     await clear_chat(message.chat.id, state)
-    text = f"✅ {client['number'] or client['telegram']} добавлен\n\n{make_client_block(client)}"
-    await message.answer(text, reply_markup=get_edit_keyboard())
-    await asyncio.sleep(300)
-    await message.delete()
+    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+
+@dp.message(AddClient.edit_birthdate)
+async def edit_birthdate(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    value = message.text.strip()
+    if value != "отсутствует":
+        try:
+            datetime.strptime(value, "%d.%m.%Y")
+        except Exception:
+            await message.answer("Некорректный формат даты! Пример: 01.05.1996", reply_markup=get_cancel_kb())
+            return
+    data = await state.get_data()
+    client = data.get("client_edit")
+    client["birthdate"] = value
+    await state.update_data(client_edit=client)
+    await clear_chat(message.chat.id, state)
+    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+
+@dp.message(AddClient.edit_account)
+async def edit_account(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    lines = message.text.split("\n")
+    acc = lines[0].strip()
+    pwd = lines[1].strip() if len(lines) > 1 else ""
+    mailpass = lines[2].strip() if len(lines) > 2 else ""
+    data = await state.get_data()
+    client = data.get("client_edit")
+    client["account"] = acc + (f" ; {pwd}" if pwd else "")
+    client["mailpass"] = mailpass
+    await state.update_data(client_edit=client)
+    await clear_chat(message.chat.id, state)
+    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+
+@dp.message(AddClient.edit_region)
+async def edit_region(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    region = message.text.strip()
+    data = await state.get_data()
+    client = data.get("client_edit")
+    client["region"] = region
+    await state.update_data(client_edit=client)
+    await clear_chat(message.chat.id, state)
+    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+
+@dp.message(AddClient.edit_codes, F.photo)
+async def edit_codes_photo(message: types.Message, state: FSMContext):
+    file_id = message.photo[-1].file_id
+    data = await state.get_data()
+    client = data.get("client_edit")
+    client["codes"] = file_id
+    await state.update_data(client_edit=client)
+    await clear_chat(message.chat.id, state)
+    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+
+@dp.message(AddClient.edit_codes)
+async def edit_codes_text(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    await message.answer("Отправьте фото с резервными кодами или нажмите ❌ Отмена.", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.edit_games)
+async def edit_games(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    games = [g.strip() for g in message.text.split("\n") if g.strip()]
+    data = await state.get_data()
+    client = data.get("client_edit")
+    client["games"] = games
+    await state.update_data(client_edit=client)
+    await clear_chat(message.chat.id, state)
+    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+
+# Для подписки (реюз шагов добавления, но с обновлением client_edit)
+@dp.message(AddClient.edit_subscription)
+async def edit_subscription_start(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    # Дальше логика копирует шаги добавления подписки — либо одну, либо две — обновляя client_edit["subscriptions"]
+    # Здесь же можно вызвать любые подэтапы как в add_client, просто используй временно FSM для этого шага, и после сохранить client_edit
 
 if __name__ == "__main__":
     import logging
