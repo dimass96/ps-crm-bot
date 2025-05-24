@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -30,14 +30,12 @@ class AddClient(StatesGroup):
     step_5_sub8 = State()
     step_6 = State()
     step_6_games = State()
-    step_7_1 = State()
     step_7_photo = State()
     edit_number = State()
     edit_birthdate = State()
     edit_account = State()
     edit_region = State()
     edit_codes = State()
-    edit_subscription = State()
     edit_games = State()
 
 class SearchClient(StatesGroup):
@@ -184,11 +182,10 @@ bot = Bot(token=TOKEN, parse_mode="HTML")
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-async def clear_chat(chat_id, state: FSMContext, keep_message_id=None):
-    await state.clear()
+async def clear_chat(chat_id, state: FSMContext, keep=None):
     try:
-        async for msg in bot.get_chat_history(chat_id, limit=40):
-            if keep_message_id and msg.message_id == keep_message_id:
+        async for msg in bot.get_chat_history(chat_id, limit=60):
+            if keep and msg.message_id in keep:
                 continue
             try:
                 await bot.delete_message(chat_id, msg.message_id)
@@ -196,6 +193,18 @@ async def clear_chat(chat_id, state: FSMContext, keep_message_id=None):
                 pass
     except:
         pass
+
+async def show_client_card(chat_id, client, state, edit_keyboard=True):
+    text = make_client_block(client)
+    msgs = []
+    msg = await bot.send_message(chat_id, text, reply_markup=get_edit_keyboard() if edit_keyboard else None)
+    msgs.append(msg.message_id)
+    if client.get("codes"):
+        m2 = await bot.send_photo(chat_id, client["codes"])
+        msgs.append(m2.message_id)
+    await state.update_data(last_card_msg_ids=msgs)
+    await clear_chat(chat_id, state, keep=msgs)
+    return msgs
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
@@ -231,22 +240,10 @@ async def searching(message: types.Message, state: FSMContext):
     if client:
         await state.update_data(edit_idx=idx)
         await state.update_data(client_edit=client)
-        msg = await send_client_card(message.chat.id, client)
-        await state.update_data(last_card_msg=msg.message_id)
+        await show_client_card(message.chat.id, client, state)
     else:
         await clear_chat(message.chat.id, state)
         await message.answer("Клиент не найден.", reply_markup=get_main_menu())
-
-async def send_client_card(chat_id, client):
-    text = make_client_block(client)
-    kb = get_edit_keyboard()
-    if client.get("codes"):
-        msg = await bot.send_message(chat_id, text, reply_markup=kb)
-        await bot.send_photo(chat_id, client["codes"])
-        return msg
-    else:
-        msg = await bot.send_message(chat_id, text, reply_markup=kb)
-        return msg
 
 @dp.message(AddClient.step_1)
 async def step1(message: types.Message, state: FSMContext):
@@ -454,9 +451,9 @@ async def step5_sub8(message: types.Message, state: FSMContext):
         await message.answer("Срок второй подписки?", reply_markup=get_term_kb(psplus=False))
     else:
         await message.answer("Срок второй подписки?", reply_markup=get_term_kb(psplus=True))
-    await state.set_state(AddClient.step_7_1)
+    await state.set_state(AddClient.step_7_photo)
 
-@dp.message(AddClient.step_7_1)
+@dp.message(AddClient.step_7_photo)
 async def step7_1(message: types.Message, state: FSMContext):
     data = await state.get_data()
     if "second_sub_term" not in data:
@@ -559,19 +556,11 @@ async def save_and_finish(message, state: FSMContext, client_data=None, edit_idx
     if edit_idx is not None:
         update_client_in_db(edit_idx, client)
         await clear_chat(message.chat.id, state)
-        info = await send_client_card(message.chat.id, client)
-        await state.update_data(last_card_msg=info.message_id)
+        await show_client_card(message.chat.id, client, state)
     else:
         add_client_to_db(client)
         await clear_chat(message.chat.id, state)
-        text = f"✅ {client['number'] or client['telegram']} добавлен\n\n{make_client_block(client)}"
-        if client.get("codes"):
-            msg = await message.answer(text, reply_markup=get_edit_keyboard())
-            await message.answer_photo(client["codes"])
-            await state.update_data(last_card_msg=msg.message_id)
-        else:
-            msg = await message.answer(text, reply_markup=get_edit_keyboard())
-            await state.update_data(last_card_msg=msg.message_id)
+        await show_client_card(message.chat.id, client, state)
         await asyncio.sleep(300)
         await clear_chat(message.chat.id, state)
 
@@ -585,7 +574,7 @@ async def process_edit_callbacks(call: types.CallbackQuery, state: FSMContext):
         await call.message.answer("Введите новый номер или Telegram:", reply_markup=get_cancel_kb())
     elif call.data == "edit_birthdate":
         await state.set_state(AddClient.edit_birthdate)
-        await call.message.answer("Введите новую дату рождения (или напишите 'отсутствует'):", reply_markup=get_cancel_kb())
+        await call.message.answer("Введите новую дату рождения (или 'отсутствует'):", reply_markup=get_cancel_kb())
     elif call.data == "edit_account":
         await state.set_state(AddClient.edit_account)
         await call.message.answer("Введите новые данные аккаунта (логин, пароль, почта):", reply_markup=get_cancel_kb())
@@ -621,9 +610,7 @@ async def edit_number(message: types.Message, state: FSMContext):
         client["number"] = value
         client["telegram"] = ""
     await state.update_data(client_edit=client)
-    await clear_chat(message.chat.id, state)
-    info = await send_client_card(message.chat.id, client)
-    await state.update_data(last_card_msg=info.message_id)
+    await show_client_card(message.chat.id, client, state)
 
 @dp.message(AddClient.edit_birthdate)
 async def edit_birthdate(message: types.Message, state: FSMContext):
@@ -641,9 +628,7 @@ async def edit_birthdate(message: types.Message, state: FSMContext):
     client = data.get("client_edit")
     client["birthdate"] = value
     await state.update_data(client_edit=client)
-    await clear_chat(message.chat.id, state)
-    info = await send_client_card(message.chat.id, client)
-    await state.update_data(last_card_msg=info.message_id)
+    await show_client_card(message.chat.id, client, state)
 
 @dp.message(AddClient.edit_account)
 async def edit_account(message: types.Message, state: FSMContext):
@@ -659,9 +644,7 @@ async def edit_account(message: types.Message, state: FSMContext):
     client["account"] = acc + (f" ; {pwd}" if pwd else "")
     client["mailpass"] = mailpass
     await state.update_data(client_edit=client)
-    await clear_chat(message.chat.id, state)
-    info = await send_client_card(message.chat.id, client)
-    await state.update_data(last_card_msg=info.message_id)
+    await show_client_card(message.chat.id, client, state)
 
 @dp.message(AddClient.edit_region)
 async def edit_region(message: types.Message, state: FSMContext):
@@ -673,9 +656,7 @@ async def edit_region(message: types.Message, state: FSMContext):
     client = data.get("client_edit")
     client["region"] = region
     await state.update_data(client_edit=client)
-    await clear_chat(message.chat.id, state)
-    info = await send_client_card(message.chat.id, client)
-    await state.update_data(last_card_msg=info.message_id)
+    await show_client_card(message.chat.id, client, state)
 
 @dp.message(AddClient.edit_codes, F.photo)
 async def edit_codes_photo(message: types.Message, state: FSMContext):
@@ -684,9 +665,7 @@ async def edit_codes_photo(message: types.Message, state: FSMContext):
     client = data.get("client_edit")
     client["codes"] = file_id
     await state.update_data(client_edit=client)
-    await clear_chat(message.chat.id, state)
-    info = await send_client_card(message.chat.id, client)
-    await state.update_data(last_card_msg=info.message_id)
+    await show_client_card(message.chat.id, client, state)
 
 @dp.message(AddClient.edit_codes)
 async def edit_codes_text(message: types.Message, state: FSMContext):
@@ -705,9 +684,7 @@ async def edit_games(message: types.Message, state: FSMContext):
     client = data.get("client_edit")
     client["games"] = games
     await state.update_data(client_edit=client)
-    await clear_chat(message.chat.id, state)
-    info = await send_client_card(message.chat.id, client)
-    await state.update_data(last_card_msg=info.message_id)
+    await show_client_card(message.chat.id, client, state)
 
 if __name__ == "__main__":
     import logging
