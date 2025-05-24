@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -184,10 +184,12 @@ bot = Bot(token=TOKEN, parse_mode="HTML")
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-async def clear_chat(chat_id, state: FSMContext):
+async def clear_chat(chat_id, state: FSMContext, keep_message_id=None):
     await state.clear()
     try:
-        async for msg in bot.get_chat_history(chat_id, limit=30):
+        async for msg in bot.get_chat_history(chat_id, limit=40):
+            if keep_message_id and msg.message_id == keep_message_id:
+                continue
             try:
                 await bot.delete_message(chat_id, msg.message_id)
             except:
@@ -229,11 +231,22 @@ async def searching(message: types.Message, state: FSMContext):
     if client:
         await state.update_data(edit_idx=idx)
         await state.update_data(client_edit=client)
-        await clear_chat(message.chat.id, state)
-        await message.answer(make_client_block(client), reply_markup=get_edit_keyboard())
+        msg = await send_client_card(message.chat.id, client)
+        await state.update_data(last_card_msg=msg.message_id)
     else:
         await clear_chat(message.chat.id, state)
         await message.answer("Клиент не найден.", reply_markup=get_main_menu())
+
+async def send_client_card(chat_id, client):
+    text = make_client_block(client)
+    kb = get_edit_keyboard()
+    if client.get("codes"):
+        msg = await bot.send_message(chat_id, text, reply_markup=kb)
+        await bot.send_photo(chat_id, client["codes"])
+        return msg
+    else:
+        msg = await bot.send_message(chat_id, text, reply_markup=kb)
+        return msg
 
 @dp.message(AddClient.step_1)
 async def step1(message: types.Message, state: FSMContext):
@@ -507,20 +520,21 @@ async def step6_games(message: types.Message, state: FSMContext):
     await state.set_state(AddClient.step_7_photo)
     await message.answer("Шаг 7\nЕсть ли резервные коды?", reply_markup=get_yesno_kb())
 
+@dp.message(AddClient.step_7_photo, F.photo)
+async def step7_photo_photo(message: types.Message, state: FSMContext):
+    file_id = message.photo[-1].file_id
+    await state.update_data(codes=file_id)
+    await save_and_finish(message, state)
+
 @dp.message(AddClient.step_7_photo)
 async def step7_photo(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await cancel(message, state)
         return
     if message.text == "Да":
-        await state.set_state(AddClient.step_7_photo)
         await message.answer("Загрузите скриншот с резервными кодами:", reply_markup=get_cancel_kb())
     elif message.text == "Нет":
         await state.update_data(codes="")
-        await save_and_finish(message, state)
-    elif message.photo:
-        file_id = message.photo[-1].file_id
-        await state.update_data(codes=file_id)
         await save_and_finish(message, state)
     else:
         await message.answer("Выберите Есть или Нету. Если выбрали 'Да', отправьте фото или нажмите Отмена.", reply_markup=get_yesno_kb())
@@ -545,14 +559,21 @@ async def save_and_finish(message, state: FSMContext, client_data=None, edit_idx
     if edit_idx is not None:
         update_client_in_db(edit_idx, client)
         await clear_chat(message.chat.id, state)
-        await message.answer("Изменения сохранены.", reply_markup=get_main_menu())
+        info = await send_client_card(message.chat.id, client)
+        await state.update_data(last_card_msg=info.message_id)
     else:
         add_client_to_db(client)
         await clear_chat(message.chat.id, state)
         text = f"✅ {client['number'] or client['telegram']} добавлен\n\n{make_client_block(client)}"
-        await message.answer(text, reply_markup=get_edit_keyboard())
+        if client.get("codes"):
+            msg = await message.answer(text, reply_markup=get_edit_keyboard())
+            await message.answer_photo(client["codes"])
+            await state.update_data(last_card_msg=msg.message_id)
+        else:
+            msg = await message.answer(text, reply_markup=get_edit_keyboard())
+            await state.update_data(last_card_msg=msg.message_id)
         await asyncio.sleep(300)
-        await message.delete()
+        await clear_chat(message.chat.id, state)
 
 @dp.callback_query(F.data.startswith("edit_"))
 async def process_edit_callbacks(call: types.CallbackQuery, state: FSMContext):
@@ -574,14 +595,16 @@ async def process_edit_callbacks(call: types.CallbackQuery, state: FSMContext):
     elif call.data == "edit_codes":
         await state.set_state(AddClient.edit_codes)
         await call.message.answer("Загрузите новый скриншот с резервными кодами:", reply_markup=get_cancel_kb())
-    elif call.data == "edit_subscription":
-        await state.set_state(AddClient.edit_subscription)
-        await call.message.answer("Сколько подписок?", reply_markup=get_subs_count_kb())
     elif call.data == "edit_games":
         await state.set_state(AddClient.edit_games)
         await call.message.answer("Введите новый список игр, каждая на новой строке:", reply_markup=get_cancel_kb())
     elif call.data == "save_changes":
-        await save_and_finish(call.message, state, client_data=client, edit_idx=idx)
+        update_client_in_db(idx, client)
+        await clear_chat(call.message.chat.id, state)
+        msg = await call.message.answer("Информация успешно сохранена", reply_markup=None)
+        await asyncio.sleep(10)
+        await bot.delete_message(call.message.chat.id, msg.message_id)
+        await call.message.answer("Выберите действие:", reply_markup=get_main_menu())
 
 @dp.message(AddClient.edit_number)
 async def edit_number(message: types.Message, state: FSMContext):
@@ -599,7 +622,8 @@ async def edit_number(message: types.Message, state: FSMContext):
         client["telegram"] = ""
     await state.update_data(client_edit=client)
     await clear_chat(message.chat.id, state)
-    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+    info = await send_client_card(message.chat.id, client)
+    await state.update_data(last_card_msg=info.message_id)
 
 @dp.message(AddClient.edit_birthdate)
 async def edit_birthdate(message: types.Message, state: FSMContext):
@@ -618,7 +642,8 @@ async def edit_birthdate(message: types.Message, state: FSMContext):
     client["birthdate"] = value
     await state.update_data(client_edit=client)
     await clear_chat(message.chat.id, state)
-    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+    info = await send_client_card(message.chat.id, client)
+    await state.update_data(last_card_msg=info.message_id)
 
 @dp.message(AddClient.edit_account)
 async def edit_account(message: types.Message, state: FSMContext):
@@ -635,7 +660,8 @@ async def edit_account(message: types.Message, state: FSMContext):
     client["mailpass"] = mailpass
     await state.update_data(client_edit=client)
     await clear_chat(message.chat.id, state)
-    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+    info = await send_client_card(message.chat.id, client)
+    await state.update_data(last_card_msg=info.message_id)
 
 @dp.message(AddClient.edit_region)
 async def edit_region(message: types.Message, state: FSMContext):
@@ -648,7 +674,8 @@ async def edit_region(message: types.Message, state: FSMContext):
     client["region"] = region
     await state.update_data(client_edit=client)
     await clear_chat(message.chat.id, state)
-    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+    info = await send_client_card(message.chat.id, client)
+    await state.update_data(last_card_msg=info.message_id)
 
 @dp.message(AddClient.edit_codes, F.photo)
 async def edit_codes_photo(message: types.Message, state: FSMContext):
@@ -658,7 +685,8 @@ async def edit_codes_photo(message: types.Message, state: FSMContext):
     client["codes"] = file_id
     await state.update_data(client_edit=client)
     await clear_chat(message.chat.id, state)
-    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
+    info = await send_client_card(message.chat.id, client)
+    await state.update_data(last_card_msg=info.message_id)
 
 @dp.message(AddClient.edit_codes)
 async def edit_codes_text(message: types.Message, state: FSMContext):
@@ -678,9 +706,8 @@ async def edit_games(message: types.Message, state: FSMContext):
     client["games"] = games
     await state.update_data(client_edit=client)
     await clear_chat(message.chat.id, state)
-    await message.answer("Изменено.\n\n" + make_client_block(client), reply_markup=get_edit_keyboard())
-
-# edit_subscription шаги при необходимости реализовать аналогично добавлению — или вставить как есть из add_client
+    info = await send_client_card(message.chat.id, client)
+    await state.update_data(last_card_msg=info.message_id)
 
 if __name__ == "__main__":
     import logging
