@@ -28,6 +28,8 @@ class AddClient(StatesGroup):
     step_5_sub6 = State()
     step_5_sub7 = State()
     step_5_sub8 = State()
+    step_5_sub9 = State()
+    step_5_sub10 = State()
     step_6 = State()
     step_6_games = State()
     step_7_photo = State()
@@ -449,46 +451,47 @@ async def step5_sub8(message: types.Message, state: FSMContext):
         await message.answer("Срок второй подписки?", reply_markup=get_term_kb(psplus=False))
     else:
         await message.answer("Срок второй подписки?", reply_markup=get_term_kb(psplus=True))
-    await state.set_state(AddClient.step_7_photo)
+    await state.set_state(AddClient.step_5_sub9)
 
-@dp.message(AddClient.step_7_photo)
-async def step7_1(message: types.Message, state: FSMContext):
+@dp.message(AddClient.step_5_sub9)
+async def step5_sub9(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    term = message.text.strip()
+    await state.update_data(second_sub_term=term)
+    await message.answer("Дата оформления второй подписки? (дд.мм.гггг):", reply_markup=get_cancel_kb())
+    await state.set_state(AddClient.step_5_sub10)
+
+@dp.message(AddClient.step_5_sub10)
+async def step5_sub10(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    date = message.text.strip()
+    try:
+        datetime.strptime(date, "%d.%m.%Y")
+    except Exception:
+        await message.answer("Некорректный формат даты! Пример: 22.05.2025", reply_markup=get_cancel_kb())
+        return
     data = await state.get_data()
-    if "second_sub_term" not in data:
-        if message.text == "❌ Отмена":
-            await cancel(message, state)
-            return
-        term = message.text.strip()
-        await state.update_data(second_sub_term=term)
-        await message.answer("Дата оформления второй подписки? (дд.мм.гггг):", reply_markup=get_cancel_kb())
-    else:
-        if message.text == "❌ Отмена":
-            await cancel(message, state)
-            return
-        date = message.text.strip()
-        try:
-            datetime.strptime(date, "%d.%m.%Y")
-        except Exception:
-            await message.answer("Некорректный формат даты! Пример: 22.05.2025", reply_markup=get_cancel_kb())
-            return
-        data = await state.get_data()
-        subs = [
-            {
-                "name": data["first_sub_type"],
-                "term": data["first_sub_term"],
-                "start": data["first_sub_date"],
-                "end": month_delta(data["first_sub_date"], int(data["first_sub_term"].replace("м", "")))
-            },
-            {
-                "name": data["second_sub_type"],
-                "term": data["second_sub_term"],
-                "start": date,
-                "end": month_delta(date, int(data["second_sub_term"].replace("м", "")))
-            }
-        ]
-        await state.update_data(subscriptions=subs)
-        await state.set_state(AddClient.step_6)
-        await message.answer("Шаг 6\nОформлены игры?", reply_markup=get_yesno_kb())
+    subs = [
+        {
+            "name": data["first_sub_type"],
+            "term": data["first_sub_term"],
+            "start": data["first_sub_date"],
+            "end": month_delta(data["first_sub_date"], int(data["first_sub_term"].replace("м", "")))
+        },
+        {
+            "name": data["second_sub_type"],
+            "term": data["second_sub_term"],
+            "start": date,
+            "end": month_delta(date, int(data["second_sub_term"].replace("м", "")))
+        }
+    ]
+    await state.update_data(subscriptions=subs)
+    await state.set_state(AddClient.step_6)
+    await message.answer("Шаг 6\nОформлены игры?", reply_markup=get_yesno_kb())
 
 @dp.message(AddClient.step_6)
 async def step6(message: types.Message, state: FSMContext):
