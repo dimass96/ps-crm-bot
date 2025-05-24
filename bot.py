@@ -31,7 +31,7 @@ class AddClient(StatesGroup):
     step_6 = State()
     step_6_games = State()
     step_7_1 = State()
-    step_7 = State()
+    step_7_photo = State()
 
 def load_db():
     if not os.path.exists(DB_PATH):
@@ -388,10 +388,10 @@ async def step5_sub8(message: types.Message, state: FSMContext):
         await message.answer("Срок второй подписки?", reply_markup=get_term_kb(psplus=False))
     else:
         await message.answer("Срок второй подписки?", reply_markup=get_term_kb(psplus=True))
-    await state.set_state(AddClient.step_7)
+    await state.set_state(AddClient.step_7_1)
 
-@dp.message(AddClient.step_7)
-async def step7(message: types.Message, state: FSMContext):
+@dp.message(AddClient.step_7_1)
+async def step7_1(message: types.Message, state: FSMContext):
     data = await state.get_data()
     if "second_sub_term" not in data:
         if message.text == "❌ Отмена":
@@ -439,7 +439,7 @@ async def step6(message: types.Message, state: FSMContext):
         await message.answer("Введите список игр, каждая на новой строке:", reply_markup=get_cancel_kb())
     elif message.text == "Нет":
         await state.update_data(games=[])
-        await state.set_state(AddClient.step_7_1)
+        await state.set_state(AddClient.step_7_photo)
         await message.answer("Шаг 7\nЕсть ли резервные коды?", reply_markup=get_yesno_kb())
     else:
         await message.answer("Выберите Да или Нет.", reply_markup=get_yesno_kb())
@@ -451,32 +451,27 @@ async def step6_games(message: types.Message, state: FSMContext):
         return
     games = [g.strip() for g in message.text.split("\n") if g.strip()]
     await state.update_data(games=games)
-    await state.set_state(AddClient.step_7_1)
+    await state.set_state(AddClient.step_7_photo)
     await message.answer("Шаг 7\nЕсть ли резервные коды?", reply_markup=get_yesno_kb())
 
-@dp.message(AddClient.step_7_1)
-async def step7_1(message: types.Message, state: FSMContext):
+@dp.message(AddClient.step_7_photo)
+async def step7_photo(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await cancel(message, state)
         return
-    if message.text == "Есть":
-        await state.set_state(AddClient.step_7)
+    if message.text == "Да":
+        await state.set_state(AddClient.step_7_photo)
         await message.answer("Загрузите скриншот с резервными кодами:", reply_markup=get_cancel_kb())
-    elif message.text == "Нету":
+        # Переводим в то же состояние, но далее обработчик только на фото!
+    elif message.text == "Нет":
         await state.update_data(codes="")
         await save_and_finish(message, state)
+    elif message.photo:
+        file_id = message.photo[-1].file_id
+        await state.update_data(codes=file_id)
+        await save_and_finish(message, state)
     else:
-        await message.answer("Выберите Есть или Нету.", reply_markup=get_yesno_kb())
-
-@dp.message(AddClient.step_7, F.photo)
-async def step7_codes(message: types.Message, state: FSMContext):
-    file_id = message.photo[-1].file_id
-    await state.update_data(codes=file_id)
-    await save_and_finish(message, state)
-
-@dp.message(AddClient.step_7)
-async def step7_wait_photo(message: types.Message, state: FSMContext):
-    await message.answer("Отправьте скриншот с резервными кодами или нажмите ❌ Отмена.", reply_markup=get_cancel_kb())
+        await message.answer("Выберите Есть или Нету. Если выбрали 'Да', отправьте фото или нажмите Отмена.", reply_markup=get_yesno_kb())
 
 async def save_and_finish(message, state: FSMContext):
     data = await state.get_data()
