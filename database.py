@@ -24,8 +24,10 @@ def add_client_to_db(client):
 def update_client_in_db(client):
     clients = load_db()
     for i, c in enumerate(clients):
-        if (c.get("number") == client.get("number") and client.get("number")) or \
-           (c.get("telegram") == client.get("telegram") and client.get("telegram")):
+        if c.get("number") == client.get("number") and c.get("number"):
+            clients[i] = client
+            break
+        elif not c.get("number") and c.get("telegram") == client.get("telegram"):
             clients[i] = client
             break
     else:
@@ -36,6 +38,13 @@ def find_client(query):
     clients = load_db()
     for c in clients:
         if c.get("number") == query or c.get("telegram") == query:
+            return c
+    return None
+
+def find_client_partial(query):
+    clients = load_db()
+    for c in clients:
+        if query in (c.get("number") or "") or query in (c.get("telegram") or ""):
             return c
     return None
 
