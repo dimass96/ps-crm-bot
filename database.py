@@ -21,25 +21,23 @@ def add_client_to_db(client):
     clients.append(client)
     save_db(clients)
 
-def update_client_in_db(index, client):
+def update_client_in_db(client):
     clients = load_db()
-    if 0 <= index < len(clients):
-        clients[index] = client
-        save_db(clients)
+    for i, c in enumerate(clients):
+        if (c.get("number") == client.get("number") and client.get("number")) or \
+           (c.get("telegram") == client.get("telegram") and client.get("telegram")):
+            clients[i] = client
+            break
+    else:
+        clients.append(client)
+    save_db(clients)
 
 def find_client(query):
     clients = load_db()
-    for i, c in enumerate(clients):
+    for c in clients:
         if c.get("number") == query or c.get("telegram") == query:
-            return i, c
-    return None, None
-
-def find_client_partial(query):
-    clients = load_db()
-    for i, c in enumerate(clients):
-        if query in (c.get("number") or "") or query in (c.get("telegram") or ""):
-            return i, c
-    return None, None
+            return c
+    return None
 
 def delete_client(query):
     clients = load_db()
