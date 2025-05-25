@@ -68,6 +68,7 @@ class AddClient(StatesGroup):
     editing_games = State()
     editing_reserve = State()
     searching = State()
+    saving = State()
 
 bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher()
@@ -170,7 +171,6 @@ def format_client_info(client):
     region = client.get("region", "отсутствует")
     subs = client.get("subscriptions", [])
     games = client.get("games", [])
-    reserve_id = client.get("reserve_photo_id")
     msg = f"👤 {number} | {birth}\n"
     msg += f"🔐 {acc}\n"
     if acc_mail:
@@ -183,17 +183,18 @@ def format_client_info(client):
     msg += f"\n🌍 Регион: ({region})\n"
     if games:
         msg += "\n🎮 Игры:\n" + "\n".join([f"• {g}" for g in games])
-    return msg, reserve_id
+    return msg
 
 async def show_client_card(chat_id, client, state):
     await clear_chat(chat_id, state)
-    text, reserve_id = format_client_info(client)
-    msg = await bot.send_message(chat_id, text, reply_markup=get_edit_kb())
-    await remember_message(state, msg)
+    text = format_client_info(client)
+    reserve_id = client.get("reserve_photo_id")
     if reserve_id:
-        p = await bot.send_photo(chat_id, reserve_id)
-        await remember_message(state, p)
-    await state.update_data(history=[])
+        msg = await bot.send_photo(chat_id, reserve_id, caption=text, reply_markup=get_edit_kb())
+    else:
+        msg = await bot.send_message(chat_id, text, reply_markup=get_edit_kb())
+    await remember_message(state, msg)
+    await state.update_data(client_edit=client, history=[msg.message_id])
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -248,7 +249,7 @@ async def step_2(message: types.Message, state: FSMContext):
         await state.set_state(AddClient.step_3)
         msg = await message.answer("Шаг 3\nДанные от аккаунта:", reply_markup=get_cancel_kb())
         await remember_message(state, msg)
-    elif message.text.lower() == "есть":
+    elif message.text.lower() == "да":
         await state.set_state(AddClient.step_2_date)
         msg = await message.answer("Введите дату рождения (дд.мм.гггг):", reply_markup=get_cancel_kb())
         await remember_message(state, msg)
@@ -558,16 +559,23 @@ async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
         await remember_message(state, msg)
     elif callback.data == "edit_games":
         await state.set_state(AddClient.editing_games)
-        msg = await bot.send_message(callback.message.chat.id, "Отправьте новый список игр (каждая с новой строки):", reply_markup=get_cancel_kb())
+        idx = (await state.get_data()).get("found_index")
+        games_list = ""
+        if idx is not None:
+            clients = load_db()
+            if 0 <= idx < len(clients):
+                if clients[idx]["games"]:
+                    games_list = "\n".join(clients[idx]["games"])
+        msg = await bot.send_message(callback.message.chat.id, "Отправьте новый список игр (каждая с новой строки):\n" + (games_list if games_list else ""), reply_markup=get_cancel_kb())
         await remember_message(state, msg)
     elif callback.data == "save_changes":
         data = await state.get_data()
         idx = data.get("found_index")
-        client = data.get("client_edit") or data.get("new_client")
+        client = data.get("client_edit")
         if idx is not None and client:
             update_client_in_db(idx, client)
         await clear_chat(callback.message.chat.id, state)
-        msg = await bot.send_message(callback.message.chat.id, "Информация успешно сохранена.", reply_markup=get_main_menu())
+        msg = await bot.send_message(callback.message.chat.id, f"Успешно сохранено: {client.get('number') or client.get('telegram')}", reply_markup=get_main_menu())
         await asyncio.sleep(10)
         await bot.delete_message(callback.message.chat.id, msg.message_id)
 
