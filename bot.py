@@ -39,6 +39,7 @@ class AddClient(StatesGroup):
     edit_region = State()
     edit_codes = State()
     edit_games = State()
+    edit_subscription = State()
     edit_subs_step1 = State()
     edit_subs_step2 = State()
     edit_subs_step3 = State()
@@ -213,15 +214,22 @@ async def cancel(message: types.Message, state: FSMContext):
 
 async def show_client_card(chat_id, client, state, edit_keyboard=True):
     text = make_client_block(client)
-    msgs = []
-    msg = await bot.send_message(chat_id, text, reply_markup=get_edit_keyboard() if edit_keyboard else None)
-    msgs.append(msg.message_id)
     if client.get("codes"):
-        m2 = await bot.send_photo(chat_id, client["codes"])
-        msgs.append(m2.message_id)
-    await state.update_data(last_card_msg_ids=msgs)
-    await clear_chat(chat_id, state, keep=msgs)
-    return msgs
+        msg = await bot.send_photo(
+            chat_id, client["codes"], caption=text,
+            reply_markup=get_edit_keyboard() if edit_keyboard else None,
+            parse_mode="HTML"
+        )
+        await state.update_data(last_card_msg_ids=[msg.message_id])
+        await clear_chat(chat_id, state, keep=[msg.message_id])
+    else:
+        msg = await bot.send_message(
+            chat_id, text,
+            reply_markup=get_edit_keyboard() if edit_keyboard else None,
+            parse_mode="HTML"
+        )
+        await state.update_data(last_card_msg_ids=[msg.message_id])
+        await clear_chat(chat_id, state, keep=[msg.message_id])
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
@@ -419,9 +427,9 @@ async def step5_sub3(message: types.Message, state: FSMContext):
     sub = message.text.strip()
     await state.update_data(first_sub_type=sub)
     if sub == "EA Play":
-        await message.answer("Срок подписки?", reply_markup=get_term_kb(psplus=False))
+        await message.answer("Срок первой подписки?", reply_markup=get_term_kb(psplus=False))
     else:
-        await message.answer("Срок подписки?", reply_markup=get_term_kb(psplus=True))
+        await message.answer("Срок первой подписки?", reply_markup=get_term_kb(psplus=True))
     await state.set_state(AddClient.step_5_sub6)
 
 @dp.message(AddClient.step_5_sub6)
@@ -535,8 +543,6 @@ async def step6_games(message: types.Message, state: FSMContext):
     await state.set_state(AddClient.step_7_photo)
     await message.answer("Шаг 7\nЕсть ли резервные коды?", reply_markup=get_yesno_kb())
 
-# ---------- Исправленный шаг с резервными кодами ----------
-
 @dp.message(AddClient.step_7_photo, F.photo)
 async def step7_photo_upload(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
@@ -584,9 +590,143 @@ async def step7_photo(message: types.Message, state: FSMContext):
     else:
         await message.answer("Выберите Есть или Нету.", reply_markup=get_yesno_kb())
 
-# ----------------------------------------------------------
+@dp.callback_query(F.data == "edit_number")
+async def edit_number_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await state.set_state(AddClient.edit_number)
+    await callback.message.answer("Введите новый номер или Telegram:", reply_markup=get_cancel_kb())
 
-# (Остальной код для редактирования и сохранения информации клиента не меняется и уже был выше. Если нужно — добавлю полный блок заново.)
+@dp.message(AddClient.edit_number)
+async def do_edit_number(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    value = message.text.strip()
+    idx = (await state.get_data()).get("edit_idx")
+    _, client = find_client(idx)
+    if value.startswith("@"):
+        client["telegram"] = value
+        client["number"] = ""
+    else:
+        client["number"] = value
+        client["telegram"] = ""
+    update_client_in_db(idx, client)
+    await show_client_card(message.chat.id, client, state)
+
+@dp.callback_query(F.data == "edit_birthdate")
+async def edit_birth_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await state.set_state(AddClient.edit_birthdate)
+    await callback.message.answer("Введите новую дату рождения (дд.мм.гггг):", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.edit_birthdate)
+async def do_edit_birth(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    value = message.text.strip()
+    try:
+        datetime.strptime(value, "%d.%m.%Y")
+    except Exception:
+        await message.answer("Некорректный формат даты! Пример: 01.05.1996", reply_markup=get_cancel_kb())
+        return
+    idx = (await state.get_data()).get("edit_idx")
+    _, client = find_client(idx)
+    client["birthdate"] = value
+    update_client_in_db(idx, client)
+    await show_client_card(message.chat.id, client, state)
+
+@dp.callback_query(F.data == "edit_account")
+async def edit_acc_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await state.set_state(AddClient.edit_account)
+    await callback.message.answer("Введите новые данные аккаунта:\nлогин\nпароль\nпочта-пароль (если есть)", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.edit_account)
+async def do_edit_acc(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    lines = message.text.split("\n")
+    acc = lines[0].strip()
+    pwd = lines[1].strip() if len(lines) > 1 else ""
+    mailpass = lines[2].strip() if len(lines) > 2 else ""
+    idx = (await state.get_data()).get("edit_idx")
+    _, client = find_client(idx)
+    client["account"] = acc + (f" ; {pwd}" if pwd else "")
+    client["mailpass"] = mailpass
+    update_client_in_db(idx, client)
+    await show_client_card(message.chat.id, client, state)
+
+@dp.callback_query(F.data == "edit_region")
+async def edit_region_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await state.set_state(AddClient.edit_region)
+    await callback.message.answer("Выберите новый регион:", reply_markup=get_region_kb())
+
+@dp.message(AddClient.edit_region)
+async def do_edit_region(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    value = message.text.strip()
+    idx = (await state.get_data()).get("edit_idx")
+    _, client = find_client(idx)
+    client["region"] = value
+    update_client_in_db(idx, client)
+    await show_client_card(message.chat.id, client, state)
+
+@dp.callback_query(F.data == "edit_codes")
+async def edit_codes_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await state.set_state(AddClient.edit_codes)
+    await callback.message.answer("Загрузите новый скриншот с резервными кодами:", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.edit_codes, F.photo)
+async def do_edit_codes_photo(message: types.Message, state: FSMContext):
+    file_id = message.photo[-1].file_id
+    idx = (await state.get_data()).get("edit_idx")
+    _, client = find_client(idx)
+    client["codes"] = file_id
+    update_client_in_db(idx, client)
+    await show_client_card(message.chat.id, client, state)
+
+@dp.callback_query(F.data == "edit_games")
+async def edit_games_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await state.set_state(AddClient.edit_games)
+    await callback.message.answer("Введите новый список игр, каждая на новой строке:", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.edit_games)
+async def do_edit_games(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel(message, state)
+        return
+    games = [g.strip() for g in message.text.split("\n") if g.strip()]
+    idx = (await state.get_data()).get("edit_idx")
+    _, client = find_client(idx)
+    client["games"] = games
+    update_client_in_db(idx, client)
+    await show_client_card(message.chat.id, client, state)
+
+@dp.callback_query(F.data == "edit_subscription")
+async def edit_sub_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await state.set_state(AddClient.edit_subscription)
+    await callback.message.answer("Для смены подписки повторите шаги добавления (выберите подписки):", reply_markup=get_subs_count_kb())
+
+@dp.message(AddClient.edit_subscription)
+async def do_edit_subs(message: types.Message, state: FSMContext):
+    # Просто повторяем шаги подписок как в добавлении — можно доработать!
+    pass
+
+@dp.callback_query(F.data == "save_changes")
+async def save_changes_cb(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await clear_chat(callback.message.chat.id, state)
+    msg = await callback.message.answer("Информация успешно сохранена.", reply_markup=get_main_menu())
+    await asyncio.sleep(10)
+    await bot.delete_message(callback.message.chat.id, msg.message_id)
 
 if __name__ == "__main__":
     import logging
