@@ -61,15 +61,22 @@ class AddClient(StatesGroup):
     step_6_games = State()
     step_7 = State()
     step_7_photo = State()
-    searching = State()
     editing_number = State()
     editing_birth = State()
     editing_account = State()
     editing_console = State()
     editing_region = State()
-    editing_reserve = State()
     editing_subscription = State()
     editing_games = State()
+    editing_reserve = State()
+    editing_subscription_count = State()
+    editing_subscription_1_type = State()
+    editing_subscription_1_term = State()
+    editing_subscription_1_date = State()
+    editing_subscription_2_type = State()
+    editing_subscription_2_term = State()
+    editing_subscription_2_date = State()
+    searching = State()
 
 bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher()
@@ -137,7 +144,6 @@ def get_subscription_term_kb(sub):
     return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 def get_edit_kb():
-    # Каждый инлайн-кнопка отдельной строкой
     kb = [
         [types.InlineKeyboardButton(text="📱 Изменить номер-TG", callback_data="edit_number")],
         [types.InlineKeyboardButton(text="📅 Изменить дату рождения", callback_data="edit_birth")],
@@ -147,25 +153,16 @@ def get_edit_kb():
         [types.InlineKeyboardButton(text="🖼 Изменить резерв коды", callback_data="edit_reserve")],
         [types.InlineKeyboardButton(text="💳 Изменить подписку", callback_data="edit_subscription")],
         [types.InlineKeyboardButton(text="🎲 Изменить игры", callback_data="edit_games")],
-        [types.InlineKeyboardButton(text="✅ Сохранить", callback_data="save_changes")],
+        [types.InlineKeyboardButton(text="✅ Сохранить", callback_data="save_changes")]
     ]
-    return types.InlineKeyboardMarkup(inline_keyboard=kb)
-
-async def get_all_user_message_ids(chat_id):
-    # Очищаем все сообщения и от пользователя, и от бота
-    history = await bot.get_chat_history(chat_id, limit=100)
-    return [msg.message_id for msg in history]
+    return types.InlineKeyboardMarkup(inline_keyboard=[[btn] for btn in kb])
 
 async def clear_full_chat(chat_id):
-    try:
-        message_ids = await get_all_user_message_ids(chat_id)
-        for msg_id in message_ids:
-            try:
-                await bot.delete_message(chat_id, msg_id)
-            except:
-                continue
-    except:
-        pass
+    async for msg in bot.get_chat_history(chat_id, limit=100):
+        try:
+            await bot.delete_message(chat_id, msg.message_id)
+        except:
+            continue
 
 def format_client_info(client):
     number = client.get("number") or client.get("telegram") or ""
@@ -176,7 +173,7 @@ def format_client_info(client):
     region = client.get("region", "отсутствует")
     subs = client.get("subscriptions", [])
     games = client.get("games", [])
-    msg = f"👤 {number} | {birth}"
+    msg = f"{number} | {birth}"
     if console:
         msg += f" ({console})"
     msg += "\n"
@@ -198,10 +195,9 @@ async def show_client_card(chat_id, client):
     text = format_client_info(client)
     reserve_id = client.get("reserve_photo_id")
     if reserve_id:
-        msg = await bot.send_photo(chat_id, reserve_id, caption=text, reply_markup=get_edit_kb())
+        await bot.send_photo(chat_id, reserve_id, caption=text, reply_markup=get_edit_kb())
     else:
-        msg = await bot.send_message(chat_id, text, reply_markup=get_edit_kb())
-    return msg
+        await bot.send_message(chat_id, text, reply_markup=get_edit_kb())
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -544,10 +540,14 @@ async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
         await bot.send_message(callback.message.chat.id, "Выберите регион:", reply_markup=get_region_kb())
     elif callback.data == "edit_reserve":
         await state.set_state(AddClient.editing_reserve)
-        await bot.send_message(callback.message.chat.id, "Загрузите новые коды (фото):", reply_markup=get_cancel_kb())
+        await bot.send_message(callback.message.chat.id, "Загрузите новое фото резервных кодов:", reply_markup=get_cancel_kb())
     elif callback.data == "edit_subscription":
-        await state.set_state(AddClient.editing_subscription)
-        await bot.send_message(callback.message.chat.id, "Измените подписки через пошаговый мастер. Начать?", reply_markup=get_yesno_kb())
+        await state.set_state(AddClient.editing_subscription_count)
+        kb = [
+            [types.KeyboardButton(text="Одна"), types.KeyboardButton(text="Две")],
+            [types.KeyboardButton(text="❌ Отмена")]
+        ]
+        await bot.send_message(callback.message.chat.id, "Сколько подписок?", reply_markup=types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True))
     elif callback.data == "edit_games":
         await state.set_state(AddClient.editing_games)
         idx = (await state.get_data()).get("found_index")
@@ -555,7 +555,7 @@ async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
         if idx is not None:
             clients = load_db()
             if 0 <= idx < len(clients):
-                if clients[idx]["games"]:
+                if clients[idx].get("games"):
                     games_list = "\n".join(clients[idx]["games"])
         await bot.send_message(callback.message.chat.id, "Отправьте новый список игр (каждая с новой строки):\n" + (games_list if games_list else ""), reply_markup=get_cancel_kb())
     elif callback.data == "save_changes":
@@ -566,7 +566,7 @@ async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
             update_client_in_db(idx, client)
         await clear_full_chat(callback.message.chat.id)
         msg = await bot.send_message(callback.message.chat.id, f"✅ {client.get('number') or client.get('telegram')} успешно сохранен", reply_markup=get_main_menu())
-        await asyncio.sleep(10)
+        await asyncio.sleep(3)
         await bot.delete_message(callback.message.chat.id, msg.message_id)
 
 @dp.message(AddClient.editing_number)
@@ -668,6 +668,129 @@ async def editing_games(message: types.Message, state: FSMContext):
     if idx is not None and 0 <= idx < len(clients):
         games = [g.strip() for g in message.text.split("\n") if g.strip()]
         clients[idx]["games"] = games
+        update_client_in_db(idx, clients[idx])
+        await show_client_card(message.chat.id, clients[idx])
+
+# Изменить подписку — как при добавлении, сразу перезаписывает блок subscriptions, пересчитывает сроки
+@dp.message(AddClient.editing_subscription_count)
+async def edit_sub_count(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    count = message.text
+    await state.update_data(sub_count=count)
+    await state.set_state(AddClient.editing_subscription_1_type)
+    await message.answer("Выберите первую подписку:", reply_markup=get_subscription_type_kb())
+
+@dp.message(AddClient.editing_subscription_1_type)
+async def edit_sub_1_type(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    await state.update_data(sub_1_type=message.text)
+    await state.set_state(AddClient.editing_subscription_1_term)
+    await message.answer("Срок первой подписки:", reply_markup=get_subscription_term_kb(message.text))
+
+@dp.message(AddClient.editing_subscription_1_term)
+async def edit_sub_1_term(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    await state.update_data(sub_1_term=message.text)
+    await state.set_state(AddClient.editing_subscription_1_date)
+    await message.answer("Дата оформления первой подписки? (дд.мм.гггг):", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.editing_subscription_1_date)
+async def edit_sub_1_date(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    try:
+        dt = datetime.strptime(message.text, "%d.%m.%Y")
+    except:
+        await message.answer("Некорректная дата! Введите в формате дд.мм.гггг", reply_markup=get_cancel_kb())
+        return
+    data = await state.get_data()
+    sub_count = data.get("sub_count")
+    sub_1_type = data.get("sub_1_type")
+    sub_1_term = data.get("sub_1_term")
+    sub_1_start = message.text
+    term_months = int(sub_1_term.replace("м", ""))
+    dt_end = (dt + timedelta(days=30*term_months)).strftime("%d.%m.%Y")
+    subscriptions = [{
+        "name": sub_1_type,
+        "term": sub_1_term,
+        "start": sub_1_start,
+        "end": dt_end
+    }]
+    await state.update_data(subscriptions=subscriptions)
+    if sub_count == "Две":
+        if "EA Play" in sub_1_type:
+            kb = [
+                [types.KeyboardButton(text="PS Plus Deluxe"), types.KeyboardButton(text="PS Plus Extra")],
+                [types.KeyboardButton(text="PS Plus Essential")],
+                [types.KeyboardButton(text="❌ Отмена")]
+            ]
+        else:
+            kb = [
+                [types.KeyboardButton(text="EA Play")],
+                [types.KeyboardButton(text="❌ Отмена")]
+            ]
+        await state.set_state(AddClient.editing_subscription_2_type)
+        await message.answer("Выберите вторую подписку:", reply_markup=types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True))
+    else:
+        idx = (await state.get_data()).get("found_index")
+        clients = load_db()
+        if idx is not None and 0 <= idx < len(clients):
+            clients[idx]["subscriptions"] = subscriptions
+            update_client_in_db(idx, clients[idx])
+            await show_client_card(message.chat.id, clients[idx])
+
+@dp.message(AddClient.editing_subscription_2_type)
+async def edit_sub_2_type(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    await state.update_data(sub_2_type=message.text)
+    await state.set_state(AddClient.editing_subscription_2_term)
+    await message.answer("Срок второй подписки:", reply_markup=get_subscription_term_kb(message.text))
+
+@dp.message(AddClient.editing_subscription_2_term)
+async def edit_sub_2_term(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    await state.update_data(sub_2_term=message.text)
+    await state.set_state(AddClient.editing_subscription_2_date)
+    await message.answer("Дата оформления второй подписки? (дд.мм.гггг):", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.editing_subscription_2_date)
+async def edit_sub_2_date(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    try:
+        dt = datetime.strptime(message.text, "%d.%m.%Y")
+    except:
+        await message.answer("Некорректная дата! Введите в формате дд.мм.гггг", reply_markup=get_cancel_kb())
+        return
+    data = await state.get_data()
+    sub_2_type = data.get("sub_2_type")
+    sub_2_term = data.get("sub_2_term")
+    sub_2_start = message.text
+    term_months = int(sub_2_term.replace("м", ""))
+    dt_end = (dt + timedelta(days=30*term_months)).strftime("%d.%m.%Y")
+    subscriptions = data.get("subscriptions")
+    subscriptions.append({
+        "name": sub_2_type,
+        "term": sub_2_term,
+        "start": sub_2_start,
+        "end": dt_end
+    })
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        clients[idx]["subscriptions"] = subscriptions
         update_client_in_db(idx, clients[idx])
         await show_client_card(message.chat.id, clients[idx])
 
