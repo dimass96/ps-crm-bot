@@ -3,64 +3,78 @@ import os
 
 DB_FILE = "clients_db.json"
 
-def _load():
+def load_db():
     if not os.path.exists(DB_FILE):
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
+        return []
     with open(DB_FILE, "r", encoding="utf-8") as f:
-        try:
-            return json.load(f)
-        except:
-            return []
+        return json.load(f)
 
-def _save(data):
+def save_db(clients):
     with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(clients, f, ensure_ascii=False, indent=2)
 
 def get_clients():
-    return _load()
-
-def get_next_id():
-    clients = _load()
-    if not clients:
-        return 1
-    return max(int(c.get("id", 0)) for c in clients) + 1
+    return load_db()
 
 def add_client(client):
-    clients = _load()
+    clients = load_db()
     clients.append(client)
-    _save(clients)
+    save_db(clients)
 
 def update_client(client):
-    clients = _load()
+    clients = load_db()
     for i, c in enumerate(clients):
-        if str(c.get("id")) == str(client.get("id")):
+        if c["id"] == client["id"]:
             clients[i] = client
             break
-    _save(clients)
+    save_db(clients)
 
 def delete_client(client_id):
-    clients = _load()
-    clients = [c for c in clients if str(c.get("id")) != str(client_id)]
-    _save(clients)
+    clients = load_db()
+    clients = [c for c in clients if c["id"] != client_id]
+    save_db(clients)
 
 def find_client(query):
-    clients = _load()
+    clients = load_db()
     for c in clients:
-        if c.get("number") == query or c.get("telegram") == query:
+        if (str(c.get("number", "")).strip() == query.strip()) or (str(c.get("telegram", "")).strip() == query.strip()):
             return c
     return None
 
 def get_client_by_id(client_id):
-    clients = _load()
+    clients = load_db()
     for c in clients:
-        if str(c.get("id")) == str(client_id):
+        if c["id"] == client_id:
             return c
     return None
 
+def get_next_id():
+    clients = load_db()
+    if not clients:
+        return 1
+    ids = [c["id"] for c in clients if "id" in c]
+    return max(ids) + 1 if ids else 1
+
 def export_db():
-    fname = "clients_export.json"
-    clients = _load()
-    with open(fname, "w", encoding="utf-8") as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
-    return fname
+    clients = load_db()
+    text = ""
+    for c in clients:
+        text += f"ID: {c.get('id', '')}\n"
+        text += f"Номер: {c.get('number', '')}\n"
+        text += f"Telegram: {c.get('telegram', '')}\n"
+        text += f"ДР: {c.get('birthdate', '')}\n"
+        text += f"Регион: {c.get('region', '')}\n"
+        text += f"Консоль: {c.get('console', '')}\n"
+        text += f"Аккаунт: {c.get('account', '')}\n"
+        text += f"Пароль: {c.get('password', '')}\n"
+        text += f"Почта/пароль: {c.get('emailpass', '')}\n"
+        subs = c.get("subscriptions", [])
+        for s in subs:
+            text += f"Подписка: {s.get('name', '')}, срок: {s.get('term', '')}, c {s.get('date_start', '')} по {s.get('date_end', '')}\n"
+        games = c.get("games", [])
+        if games:
+            text += "Игры: " + ", ".join(games) + "\n"
+        text += "-"*24 + "\n"
+    return text if text else "База пуста."
