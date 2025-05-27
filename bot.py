@@ -451,6 +451,7 @@ async def step_6(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await cancel_handler(message, state)
         return
+    # Вот здесь три кнопки: Да / Нет / Отмена
     if message.text.lower() == "нет":
         client = (await state.get_data())["new_client"]
         client["games"] = []
@@ -565,7 +566,7 @@ async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
         if idx is not None:
             clients = load_db()
             if 0 <= idx < len(clients):
-                if clients[idx]["games"]:
+                if clients[idx].get("games"):
                     games_list = "\n".join(clients[idx]["games"])
         await send_and_save(bot.send_message, callback.message.chat.id, state, "Отправьте новый список игр (каждая с новой строки):\n" + (games_list if games_list else ""), reply_markup=get_cancel_kb())
     elif callback.data == "save_changes":
