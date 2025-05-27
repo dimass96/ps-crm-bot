@@ -74,7 +74,6 @@ class AddClient(StatesGroup):
 bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher()
 
-# Широкие инлайн-кнопки
 def get_edit_kb():
     buttons = [
         [types.InlineKeyboardButton(text="📱 Изменить номер-TG", callback_data="edit_number")],
@@ -225,6 +224,198 @@ async def add_client(message: types.Message, state: FSMContext):
     await clear_full_chat(message.chat.id, state)
     await state.set_state(AddClient.step_1)
     await send_and_save(bot.send_message, message.chat.id, state, "Шаг 1\nНомер телефона или Telegram:", reply_markup=get_cancel_kb())
+
+@dp.message(F.text == "🔍 Найти клиента")
+async def search_client(message: types.Message, state: FSMContext):
+    await clear_full_chat(message.chat.id, state)
+    await state.clear()
+    await state.set_state(AddClient.searching)
+    await send_and_save(bot.send_message, message.chat.id, state, "Введите номер телефона или Telegram клиента для поиска:", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.searching)
+async def searching(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    idx, client = find_client(message.text)
+    if client:
+        await state.update_data(found_index=idx)
+        await show_client_card(message.chat.id, client, state)
+        await state.update_data(client_edit=client)
+    else:
+        await clear_full_chat(message.chat.id, state)
+        await send_and_save(bot.send_message, message.chat.id, state, "Клиент не найден.", reply_markup=get_main_menu())
+
+@dp.callback_query(F.data.startswith("edit_"))
+async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
+    await clear_full_chat(callback.message.chat.id, state)
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        await state.update_data(client_edit=clients[idx])
+    if callback.data == "edit_number":
+        await state.set_state(AddClient.editing_number)
+        await send_and_save(bot.send_message, callback.message.chat.id, state, "Введите новый номер или Telegram:", reply_markup=get_cancel_kb())
+    elif callback.data == "edit_birth":
+        await state.set_state(AddClient.editing_birth)
+        await send_and_save(bot.send_message, callback.message.chat.id, state, "Введите новую дату рождения:", reply_markup=get_cancel_kb())
+    elif callback.data == "edit_account":
+        await state.set_state(AddClient.editing_account)
+        await send_and_save(bot.send_message, callback.message.chat.id, state, "Введите новые данные аккаунта (логин, пароль, почта-пароль, по строкам):", reply_markup=get_cancel_kb())
+    elif callback.data == "edit_console":
+        await state.set_state(AddClient.editing_console)
+        await send_and_save(bot.send_message, callback.message.chat.id, state, "Выберите консоль:", reply_markup=get_console_kb())
+    elif callback.data == "edit_region":
+        await state.set_state(AddClient.editing_region)
+        await send_and_save(bot.send_message, callback.message.chat.id, state, "Выберите регион:", reply_markup=get_region_kb())
+    elif callback.data == "edit_reserve":
+        await state.set_state(AddClient.editing_reserve)
+        await send_and_save(bot.send_message, callback.message.chat.id, state, "Загрузите новое фото резервных кодов:", reply_markup=get_cancel_kb())
+    elif callback.data == "edit_subscription":
+        idx = (await state.get_data()).get("found_index")
+        clients = load_db()
+        if idx is not None and 0 <= idx < len(clients):
+            client = clients[idx]
+            client["subscriptions"] = []
+            await state.update_data(new_client=client)
+            await state.set_state(AddClient.step_5)
+            await send_and_save(bot.send_message, callback.message.chat.id, state, "Оформлена ли подписка?", reply_markup=get_yesno_kb())
+            return
+    elif callback.data == "edit_games":
+        await state.set_state(AddClient.editing_games)
+        idx = (await state.get_data()).get("found_index")
+        games_list = ""
+        if idx is not None:
+            clients = load_db()
+            if 0 <= idx < len(clients):
+                if clients[idx]["games"]:
+                    games_list = "\n".join(clients[idx]["games"])
+        await send_and_save(bot.send_message, callback.message.chat.id, state, "Отправьте новый список игр (каждая с новой строки):\n" + (games_list if games_list else ""), reply_markup=get_cancel_kb())
+    elif callback.data == "save_changes":
+        data = await state.get_data()
+        idx = data.get("found_index")
+        client = data.get("client_edit")
+        if idx is not None and client:
+            update_client_in_db(idx, client)
+        await clear_full_chat(callback.message.chat.id, state)
+        msg = await bot.send_message(callback.message.chat.id, f"✅ {client.get('number') or client.get('telegram')} успешно сохранён", reply_markup=get_main_menu())
+        await asyncio.sleep(5)
+        await bot.delete_message(callback.message.chat.id, msg.message_id)
+
+@dp.message(AddClient.editing_number)
+async def editing_number(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        if message.text.startswith("@"):
+            clients[idx]["number"] = ""
+            clients[idx]["telegram"] = message.text
+        else:
+            clients[idx]["number"] = message.text
+            clients[idx]["telegram"] = ""
+        update_client_in_db(idx, clients[idx])
+        await state.update_data(client_edit=clients[idx])
+        await show_client_card(message.chat.id, clients[idx], state)
+
+@dp.message(AddClient.editing_birth)
+async def editing_birth(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        try:
+            dt = datetime.strptime(message.text, "%d.%m.%Y")
+            clients[idx]["birthdate"] = message.text
+        except:
+            if message.text.lower() in ["нет", "нету"]:
+                clients[idx]["birthdate"] = "отсутствует"
+            else:
+                await send_and_save(bot.send_message, message.chat.id, state, "Некорректная дата!", reply_markup=get_cancel_kb())
+                return
+        update_client_in_db(idx, clients[idx])
+        await state.update_data(client_edit=clients[idx])
+        await show_client_card(message.chat.id, clients[idx], state)
+
+@dp.message(AddClient.editing_account)
+async def editing_account(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    lines = message.text.strip().split("\n")
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        clients[idx]["account"] = lines[0] if len(lines) > 0 else ""
+        clients[idx]["mailpass"] = lines[1] if len(lines) > 1 else ""
+        update_client_in_db(idx, clients[idx])
+        await state.update_data(client_edit=clients[idx])
+        await show_client_card(message.chat.id, clients[idx], state)
+
+@dp.message(AddClient.editing_console)
+async def editing_console(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        if message.text in ["PS4", "PS5", "PS4/PS5"]:
+            clients[idx]["console"] = message.text
+            update_client_in_db(idx, clients[idx])
+            await state.update_data(client_edit=clients[idx])
+            await show_client_card(message.chat.id, clients[idx], state)
+        else:
+            await send_and_save(bot.send_message, message.chat.id, state, "Выберите консоль кнопкой.", reply_markup=get_console_kb())
+
+@dp.message(AddClient.editing_region)
+async def editing_region(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        clients[idx]["region"] = message.text
+        update_client_in_db(idx, clients[idx])
+        await state.update_data(client_edit=clients[idx])
+        await show_client_card(message.chat.id, clients[idx], state)
+
+@dp.message(AddClient.editing_reserve, F.photo)
+async def editing_reserve_photo(message: types.Message, state: FSMContext):
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        photo_id = message.photo[-1].file_id
+        clients[idx]["reserve_photo_id"] = photo_id
+        update_client_in_db(idx, clients[idx])
+        await state.update_data(client_edit=clients[idx])
+        await show_client_card(message.chat.id, clients[idx], state)
+
+@dp.message(AddClient.editing_reserve)
+async def editing_reserve_text(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+    else:
+        await send_and_save(bot.send_message, message.chat.id, state, "Пожалуйста, отправьте именно фото или нажмите Отмена.", reply_markup=get_cancel_kb())
+
+@dp.message(AddClient.editing_games)
+async def editing_games(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    idx = (await state.get_data()).get("found_index")
+    clients = load_db()
+    if idx is not None and 0 <= idx < len(clients):
+        games = [g.strip() for g in message.text.split("\n") if g.strip()]
+        clients[idx]["games"] = games
+        update_client_in_db(idx, clients[idx])
+        await state.update_data(client_edit=clients[idx])
+        await show_client_card(message.chat.id, clients[idx], state)
 
 @dp.message(AddClient.step_1)
 async def step_1(message: types.Message, state: FSMContext):
@@ -503,199 +694,6 @@ async def step_7_photo_text(message: types.Message, state: FSMContext):
         await cancel_handler(message, state)
     else:
         await send_and_save(bot.send_message, message.chat.id, state, "Пожалуйста, отправьте именно фото или нажмите Отмена.", reply_markup=get_cancel_kb())
-
-@dp.message(F.text == "🔍 Найти клиента")
-async def search_client(message: types.Message, state: FSMContext):
-    await clear_full_chat(message.chat.id, state)
-    await state.clear()
-    await state.set_state(AddClient.searching)
-    await send_and_save(bot.send_message, message.chat.id, state, "Введите номер телефона или Telegram клиента для поиска:", reply_markup=get_cancel_kb())
-
-@dp.message(AddClient.searching)
-async def searching(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-        return
-    idx, client = find_client(message.text)
-    if client:
-        await state.update_data(found_index=idx)
-        await show_client_card(message.chat.id, client, state)
-        await state.update_data(client_edit=client)
-    else:
-        await clear_full_chat(message.chat.id, state)
-        await send_and_save(bot.send_message, message.chat.id, state, "Клиент не найден.", reply_markup=get_main_menu())
-
-@dp.callback_query(F.data.startswith("edit_"))
-async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
-    await clear_full_chat(callback.message.chat.id, state)
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        await state.update_data(client_edit=clients[idx])
-    if callback.data == "edit_number":
-        await state.set_state(AddClient.editing_number)
-        await send_and_save(bot.send_message, callback.message.chat.id, state, "Введите новый номер или Telegram:", reply_markup=get_cancel_kb())
-    elif callback.data == "edit_birth":
-        await state.set_state(AddClient.editing_birth)
-        await send_and_save(bot.send_message, callback.message.chat.id, state, "Введите новую дату рождения:", reply_markup=get_cancel_kb())
-    elif callback.data == "edit_account":
-        await state.set_state(AddClient.editing_account)
-        await send_and_save(bot.send_message, callback.message.chat.id, state, "Введите новые данные аккаунта (логин, пароль, почта-пароль, по строкам):", reply_markup=get_cancel_kb())
-    elif callback.data == "edit_console":
-        await state.set_state(AddClient.editing_console)
-        await send_and_save(bot.send_message, callback.message.chat.id, state, "Выберите консоль:", reply_markup=get_console_kb())
-    elif callback.data == "edit_region":
-        await state.set_state(AddClient.editing_region)
-        await send_and_save(bot.send_message, callback.message.chat.id, state, "Выберите регион:", reply_markup=get_region_kb())
-    elif callback.data == "edit_reserve":
-        await state.set_state(AddClient.editing_reserve)
-        await send_and_save(bot.send_message, callback.message.chat.id, state, "Загрузите новое фото резервных кодов:", reply_markup=get_cancel_kb())
-    elif callback.data == "edit_subscription":
-        # полноценная замена подписки - сразу запуск как при добавлении
-        idx = (await state.get_data()).get("found_index")
-        clients = load_db()
-        if idx is not None and 0 <= idx < len(clients):
-            client = clients[idx]
-            client["subscriptions"] = []
-            await state.update_data(new_client=client)
-            await state.set_state(AddClient.step_5)
-            await send_and_save(bot.send_message, callback.message.chat.id, state, "Оформлена ли подписка?", reply_markup=get_yesno_kb())
-            return
-    elif callback.data == "edit_games":
-        await state.set_state(AddClient.editing_games)
-        idx = (await state.get_data()).get("found_index")
-        games_list = ""
-        if idx is not None:
-            clients = load_db()
-            if 0 <= idx < len(clients):
-                if clients[idx]["games"]:
-                    games_list = "\n".join(clients[idx]["games"])
-        await send_and_save(bot.send_message, callback.message.chat.id, state, "Отправьте новый список игр (каждая с новой строки):\n" + (games_list if games_list else ""), reply_markup=get_cancel_kb())
-    elif callback.data == "save_changes":
-        data = await state.get_data()
-        idx = data.get("found_index")
-        client = data.get("client_edit")
-        if idx is not None and client:
-            update_client_in_db(idx, client)
-        await clear_full_chat(callback.message.chat.id, state)
-        msg = await bot.send_message(callback.message.chat.id, f"✅ {client.get('number') or client.get('telegram')} успешно сохранён", reply_markup=get_main_menu())
-        await asyncio.sleep(5)
-        await bot.delete_message(callback.message.chat.id, msg.message_id)
-
-@dp.message(AddClient.editing_number)
-async def editing_number(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-        return
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        if message.text.startswith("@"):
-            clients[idx]["number"] = ""
-            clients[idx]["telegram"] = message.text
-        else:
-            clients[idx]["number"] = message.text
-            clients[idx]["telegram"] = ""
-        update_client_in_db(idx, clients[idx])
-        await state.update_data(client_edit=clients[idx])
-        await show_client_card(message.chat.id, clients[idx], state)
-
-@dp.message(AddClient.editing_birth)
-async def editing_birth(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-        return
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        try:
-            dt = datetime.strptime(message.text, "%d.%m.%Y")
-            clients[idx]["birthdate"] = message.text
-        except:
-            if message.text.lower() in ["нет", "нету"]:
-                clients[idx]["birthdate"] = "отсутствует"
-            else:
-                await send_and_save(bot.send_message, message.chat.id, state, "Некорректная дата!", reply_markup=get_cancel_kb())
-                return
-        update_client_in_db(idx, clients[idx])
-        await state.update_data(client_edit=clients[idx])
-        await show_client_card(message.chat.id, clients[idx], state)
-
-@dp.message(AddClient.editing_account)
-async def editing_account(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-        return
-    lines = message.text.strip().split("\n")
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        clients[idx]["account"] = lines[0] if len(lines) > 0 else ""
-        clients[idx]["mailpass"] = lines[1] if len(lines) > 1 else ""
-        update_client_in_db(idx, clients[idx])
-        await state.update_data(client_edit=clients[idx])
-        await show_client_card(message.chat.id, clients[idx], state)
-
-@dp.message(AddClient.editing_console)
-async def editing_console(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-        return
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        if message.text in ["PS4", "PS5", "PS4/PS5"]:
-            clients[idx]["console"] = message.text
-            update_client_in_db(idx, clients[idx])
-            await state.update_data(client_edit=clients[idx])
-            await show_client_card(message.chat.id, clients[idx], state)
-        else:
-            await send_and_save(bot.send_message, message.chat.id, state, "Выберите консоль кнопкой.", reply_markup=get_console_kb())
-
-@dp.message(AddClient.editing_region)
-async def editing_region(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-        return
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        clients[idx]["region"] = message.text
-        update_client_in_db(idx, clients[idx])
-        await state.update_data(client_edit=clients[idx])
-        await show_client_card(message.chat.id, clients[idx], state)
-
-@dp.message(AddClient.editing_reserve, F.photo)
-async def editing_reserve_photo(message: types.Message, state: FSMContext):
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        photo_id = message.photo[-1].file_id
-        clients[idx]["reserve_photo_id"] = photo_id
-        update_client_in_db(idx, clients[idx])
-        await state.update_data(client_edit=clients[idx])
-        await show_client_card(message.chat.id, clients[idx], state)
-
-@dp.message(AddClient.editing_reserve)
-async def editing_reserve_text(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-    else:
-        await send_and_save(bot.send_message, message.chat.id, state, "Пожалуйста, отправьте именно фото или нажмите Отмена.", reply_markup=get_cancel_kb())
-
-@dp.message(AddClient.editing_games)
-async def editing_games(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_handler(message, state)
-        return
-    idx = (await state.get_data()).get("found_index")
-    clients = load_db()
-    if idx is not None and 0 <= idx < len(clients):
-        games = [g.strip() for g in message.text.split("\n") if g.strip()]
-        clients[idx]["games"] = games
-        update_client_in_db(idx, clients[idx])
-        await state.update_data(client_edit=clients[idx])
-        await show_client_card(message.chat.id, clients[idx], state)
 
 if __name__ == "__main__":
     import logging
