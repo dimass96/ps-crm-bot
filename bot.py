@@ -25,10 +25,17 @@ logging.basicConfig(level=logging.INFO)
 
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="➕ Добавить клиента")],
-        [KeyboardButton(text="🔍 Найти клиента")],
-        [KeyboardButton(text="📦 Выгрузить базу")],
-        [KeyboardButton(text="🧹 Очистить чат")]
+@dp.message(F.text == "➕ Добавить клиента")
+async def add_start(message: types.Message, state: FSMContext):
+    ...
+@dp.message(F.text == "🔍 Найти клиента")
+async def search_client(message: types.Message, state: FSMContext):
+    ...
+@dp.message(F.text == "📦 Выгрузить базу")
+async def export_db_cmd(message: types.Message):
+    ...
+@dp.message(F.text == "🧹 Очистить чат")
+async def clear_chat_cmd(message: types.Message, state: FSMContext):
     ],
     resize_keyboard=True
 )
