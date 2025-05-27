@@ -70,7 +70,6 @@ class AddClient(StatesGroup):
     editing_games = State()
     editing_reserve = State()
     searching = State()
-    saving = State()
 
 bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher()
@@ -177,7 +176,6 @@ def format_client_info(client):
         msg += "\n🎮 Игры:\n" + "\n".join([f"• {g}" for g in games])
     return msg
 
-# Сообщения
 async def send_and_save(msg_func, chat_id, state, *args, **kwargs):
     msg = await msg_func(chat_id, *args, **kwargs)
     data = await state.get_data()
@@ -204,7 +202,6 @@ async def show_client_card(chat_id, client, state: FSMContext):
         msg = await send_and_save(bot.send_photo, chat_id, state, reserve_id, caption=text, reply_markup=get_edit_kb())
     else:
         msg = await send_and_save(bot.send_message, chat_id, state, text, reply_markup=get_edit_kb())
-    await state.update_data(client_edit=client)
     return msg
 
 @dp.message(CommandStart())
@@ -485,8 +482,6 @@ async def step_7(message: types.Message, state: FSMContext):
         client = (await state.get_data())["new_client"]
         client["reserve_photo_id"] = None
         add_client_to_db(client)
-        await state.clear()
-        await clear_full_chat(message.chat.id, state)
         await show_client_card(message.chat.id, client, state)
     elif message.text.lower() == "да":
         await state.set_state(AddClient.step_7_photo)
@@ -498,8 +493,6 @@ async def step_7_photo(message: types.Message, state: FSMContext):
     client = (await state.get_data())["new_client"]
     client["reserve_photo_id"] = photo_id
     add_client_to_db(client)
-    await state.clear()
-    await clear_full_chat(message.chat.id, state)
     await show_client_card(message.chat.id, client, state)
 
 @dp.message(AddClient.step_7_photo)
