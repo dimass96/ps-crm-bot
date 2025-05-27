@@ -2,6 +2,7 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
+from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
@@ -19,9 +20,13 @@ import logging
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
 
-bot = Bot(token=API_TOKEN, parse_mode='HTML')
+bot = Bot(
+    token=API_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
 dp = Dispatcher()
 logging.basicConfig(level=logging.INFO)
+
 
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
