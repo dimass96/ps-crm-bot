@@ -1,89 +1,74 @@
 import json
 import os
+from copy import deepcopy
 
-DB_PATH = "clients_db.json"
+DB_FILE = "clients_db.json"
 
-def load_db():
-    if not os.path.exists(DB_PATH):
-        return []
-    with open(DB_PATH, encoding="utf-8") as f:
+def read_db():
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False)
+    with open(DB_FILE, "r", encoding="utf-8") as f:
         try:
             return json.load(f)
-        except Exception:
+        except:
             return []
 
 def save_db(clients):
-    with open(DB_PATH, "w", encoding="utf-8") as f:
+    with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(clients, f, ensure_ascii=False, indent=2)
 
-def add_client_to_db(client):
-    clients = load_db()
-    clients.append(client)
+def get_clients():
+    return read_db()
+
+def get_next_id():
+    clients = read_db()
+    if not clients:
+        return 1
+    return max([c.get("id", 0) for c in clients]) + 1
+
+def add_client(client):
+    clients = read_db()
+    clients.append(deepcopy(client))
     save_db(clients)
 
-def update_client_in_db(client):
-    clients = load_db()
+def update_client(client):
+    clients = read_db()
     for i, c in enumerate(clients):
-        if c.get("number") == client.get("number") and c.get("number"):
-            clients[i] = client
+        if c.get("id") == client.get("id"):
+            clients[i] = deepcopy(client)
             break
-        elif not c.get("number") and c.get("telegram") == client.get("telegram"):
-            clients[i] = client
-            break
-    else:
-        clients.append(client)
     save_db(clients)
 
-def find_client(query):
-    clients = load_db()
+def delete_client(client_id):
+    clients = read_db()
+    clients = [c for c in clients if c.get("id") != client_id]
+    save_db(clients)
+
+def find_client(key):
+    clients = read_db()
     for c in clients:
-        if c.get("number") == query or c.get("telegram") == query:
-            return c
+        if key == c.get("number") or key == c.get("telegram"):
+            return deepcopy(c)
     return None
 
-def find_client_partial(query):
-    clients = load_db()
+def get_client_by_id(client_id):
+    clients = read_db()
     for c in clients:
-        if query in (c.get("number") or "") or query in (c.get("telegram") or ""):
-            return c
+        if c.get("id") == client_id:
+            return deepcopy(c)
     return None
 
-def delete_client(query):
-    clients = load_db()
-    new_clients = []
-    deleted = False
-    for c in clients:
-        if c.get("number") == query or c.get("telegram") == query:
-            deleted = True
-            continue
-        new_clients.append(c)
-    save_db(new_clients)
-    return deleted
+def export_db():
+    clients = read_db()
+    filename = "clients_export.json"
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(clients, f, ensure_ascii=False, indent=2)
+    return filename
 
-def export_all():
-    clients = load_db()
-    result = []
-    for c in clients:
-        number = c.get("number") or c.get("telegram") or ""
-        birth = c.get("birthdate", "отсутствует")
-        acc = c.get("account", "")
-        acc_mail = c.get("mailpass", "")
-        region = c.get("region", "отсутствует")
-        subs = c.get("subscriptions", [])
-        games = c.get("games", [])
-        text = f"Клиент: {number} | {birth}\nАккаунт: {acc} ({region})\n"
-        if acc_mail:
-            text += f"Почта-пароль: {acc_mail}\n"
-        if subs and subs[0].get("name") != "отсутствует":
-            for s in subs:
-                text += f"Подписка: {s['name']} {s['term']} ({region}) с {s['start']} по {s['end']}\n"
-        else:
-            text += "Подписки: отсутствует\n"
-        text += f"Регион: {region}\n"
-        if games:
-            text += "Игры:\n"
-            for g in games:
-                text += f"- {g}\n"
-        text += "\n"
-        result.append(text)
-    return "\n".join(result)
+# Фоновые проверки (заглушки, сама логика реализуется в bot.py)
+def check_birthdays():
+    pass
+
+def check_subscriptions():
+    pass
