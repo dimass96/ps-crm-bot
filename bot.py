@@ -32,6 +32,14 @@ main_kb = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True
 )
+
+@dp.message(F.text == "/start")
+async def start_cmd(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Нет доступа!")
+        return
+    await message.answer("Главное меню", reply_markup=main_kb)
+    await state.clear()
 cancel_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="❌ Отмена")]],
     resize_keyboard=True,
