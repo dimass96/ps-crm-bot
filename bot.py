@@ -5,23 +5,17 @@ import json
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandStart
-from aiogram.types import (ReplyKeyboardMarkup, KeyboardButton, 
-                           InlineKeyboardMarkup, InlineKeyboardButton, 
-                           ReplyKeyboardRemove, InputFile)
-from aiogram.utils.markdown import hbold
-from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InputFile
 
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
-
 DATA_FILE = "clients.json"
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher()
-
-# --- Вспомогательные функции ---
+user_states = {}
 
 def load_db():
     if not os.path.exists(DATA_FILE):
@@ -66,25 +60,21 @@ def delete_client(client_id):
 def format_client_info(client):
     lines = []
     contact = client["contact"]
-    bdate = client["birth_date"] if client["birth_date"] else "—"
-    console = client["console"]
+    bdate = client.get("birth_date") or "—"
+    console = client.get("console", "—")
     lines.append(f"📱 <b>{contact}</b> | {bdate} <b>({console})</b>")
-
-    login = client["account_login"]
-    password = client["account_password"]
-    mail_pass = client["mail_password"] or "—"
+    login = client.get("account_login", "—")
+    password = client.get("account_password", "—")
+    mail_pass = client.get("mail_password", "—")
     lines.append(f"🔑 {login}; {password}")
     lines.append(f"📧 {mail_pass}")
-
     for i in (1, 2):
         sub = client.get(f"subscription_{i}", {})
         if sub and sub.get("type"):
             lines.append(f"💳 {sub['type']} {sub['duration']}")
             lines.append(f"📅 {sub['start_date']} — {sub['end_date']}")
-
-    region = client["region"]
+    region = client.get("region", "—")
     lines.append(f"🌍 Регион: <b>({region})</b>")
-
     if client.get("games"):
         lines.append("\n🎮 Игры:")
         for game in client["games"]:
@@ -92,8 +82,6 @@ def format_client_info(client):
     if client.get("reserve_codes"):
         lines.append("\n🗂 Резерв-коды: загружено")
     return "\n".join(lines)
-
-# --- Хэндлеры ---
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -126,10 +114,6 @@ async def dump_db(message: types.Message):
     await bot.send_document(message.chat.id, InputFile(fname))
     os.remove(fname)
 
-# --- Добавление клиента ---
-
-user_states = {}
-
 async def start_add_client(message):
     user_states[message.from_user.id] = {"step": "contact", "data": {}}
     kb = ReplyKeyboardMarkup(
@@ -151,14 +135,11 @@ async def cancel(message: types.Message):
 async def add_flow(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
-
     state = user_states.get(message.from_user.id)
     if not state:
         return
-
     step = state["step"]
     data = state["data"]
-
     if step == "contact":
         data["contact"] = message.text.strip()
         state["step"] = "birth_ask"
@@ -172,7 +153,6 @@ async def add_flow(message: types.Message):
         )
         await message.answer("Есть ли дата рождения клиента?", reply_markup=kb)
         return
-
     if step == "birth_ask":
         if message.text == "Есть дата рождения":
             state["step"] = "birth_date"
@@ -193,7 +173,6 @@ async def add_flow(message: types.Message):
             return
         await message.answer("Выберите 'Есть дата рождения' или 'Нет даты рождения'.")
         return
-
     if step == "birth_date":
         try:
             dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
@@ -212,7 +191,6 @@ async def add_flow(message: types.Message):
         except Exception:
             await message.answer("Введите дату в формате дд.мм.гггг")
             return
-
     if step == "console":
         if message.text not in ("PS4", "PS5", "PS4/PS5"):
             await message.answer("Выберите консоль кнопкой.")
@@ -221,19 +199,16 @@ async def add_flow(message: types.Message):
         state["step"] = "account_login"
         await message.answer("Введите ЛОГИН от аккаунта:")
         return
-
     if step == "account_login":
         data["account_login"] = message.text.strip()
         state["step"] = "account_password"
         await message.answer("Введите ПАРОЛЬ от аккаунта:")
         return
-
     if step == "account_password":
         data["account_password"] = message.text.strip()
         state["step"] = "mail_password"
         await message.answer("Введите ПАРОЛЬ от почты (или '-' если нет):")
         return
-
     if step == "mail_password":
         data["mail_password"] = message.text.strip() if message.text.strip() != "-" else ""
         state["step"] = "region"
@@ -248,7 +223,6 @@ async def add_flow(message: types.Message):
         )
         await message.answer("Выберите регион аккаунта:", reply_markup=kb)
         return
-
     if step == "region":
         if message.text not in ("укр", "тур", "польша", "британия", "другой"):
             await message.answer("Выберите регион кнопкой.")
@@ -266,9 +240,7 @@ async def add_flow(message: types.Message):
         )
         await message.answer("Сколько подписок у клиента?", reply_markup=kb)
         return
-
     if step == "subs_ask":
-        # reset subscriptions
         data["subscription_1"] = {}
         data["subscription_2"] = {}
         if message.text == "Нет подписки":
@@ -308,11 +280,11 @@ async def add_flow(message: types.Message):
                 resize_keyboard=True
             )
             await message.answer("Выберите первую подписку:", reply_markup=kb)
+            user_states[message.from_user.id]["want_second_sub"] = True
             return
         else:
             await message.answer("Выберите количество подписок кнопкой.")
             return
-
     if step == "sub1_type":
         v = message.text
         if v not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play"):
@@ -324,13 +296,14 @@ async def add_flow(message: types.Message):
         else:
             durations = [["1м", "3м", "12м"]]
         kb = ReplyKeyboardMarkup(
-            keyboard=[list(map(KeyboardButton, row)) for row in durations] + [[KeyboardButton(text="Отмена")]],
+            keyboard=[
+                [KeyboardButton(text=label) for label in row] for row in durations
+            ] + [[KeyboardButton(text="Отмена")]],
             resize_keyboard=True
         )
         state["step"] = "sub1_duration"
         await message.answer("Выберите срок подписки:", reply_markup=kb)
         return
-
     if step == "sub1_duration":
         v = message.text
         if data["subscription_1"]["type"] == "EA Play" and v not in ("1м", "12м"):
@@ -343,27 +316,32 @@ async def add_flow(message: types.Message):
         state["step"] = "sub1_start"
         await message.answer("Введите дату оформления подписки (дд.мм.гггг):")
         return
-
     if step == "sub1_start":
         try:
             dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
             data["subscription_1"]["start_date"] = message.text.strip()
             data["subscription_1"]["end_date"] = calc_sub_end(message.text.strip(), data["subscription_1"]["duration"])
-            if user_states[message.from_user.id]["step"] == "sub1_start" and (
-                data.get("subscription_2") is not None and user_states[message.from_user.id].get("want_second_sub")):
+            if user_states[message.from_user.id].get("want_second_sub"):
                 state["step"] = "sub2_type"
-                kb = ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="EA Play")] if data["subscription_1"]["type"] != "EA Play" else
-                        [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra"), KeyboardButton(text="PS Plus Essential")],
-                        [KeyboardButton(text="Отмена")]
-                    ],
-                    resize_keyboard=True
-                )
+                if data["subscription_1"]["type"] != "EA Play":
+                    kb = ReplyKeyboardMarkup(
+                        keyboard=[
+                            [KeyboardButton(text="EA Play")],
+                            [KeyboardButton(text="Отмена")]
+                        ],
+                        resize_keyboard=True
+                    )
+                else:
+                    kb = ReplyKeyboardMarkup(
+                        keyboard=[
+                            [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra"), KeyboardButton(text="PS Plus Essential")],
+                            [KeyboardButton(text="Отмена")]
+                        ],
+                        resize_keyboard=True
+                    )
                 await message.answer("Выберите вторую подписку:", reply_markup=kb)
                 return
-            elif user_states[message.from_user.id]["step"] == "sub1_start" and (
-                user_states[message.from_user.id].get("want_second_sub") is None and data.get("subscription_2") == {}):
+            else:
                 state["step"] = "games_ask"
                 kb = ReplyKeyboardMarkup(
                     keyboard=[
@@ -375,22 +353,9 @@ async def add_flow(message: types.Message):
                 )
                 await message.answer("Есть ли у клиента оформленные игры?", reply_markup=kb)
                 return
-            else:
-                state["step"] = "sub2_type"
-                kb = ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="EA Play")] if data["subscription_1"]["type"] != "EA Play" else
-                        [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra"), KeyboardButton(text="PS Plus Essential")],
-                        [KeyboardButton(text="Отмена")]
-                    ],
-                    resize_keyboard=True
-                )
-                await message.answer("Выберите вторую подписку:", reply_markup=kb)
-                return
         except Exception:
             await message.answer("Введите дату в формате дд.мм.гггг")
             return
-
     if step == "sub2_type":
         v = message.text
         if data["subscription_1"]["type"] == "EA Play" and v not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"):
@@ -405,13 +370,14 @@ async def add_flow(message: types.Message):
         else:
             durations = [["1м", "3м", "12м"]]
         kb = ReplyKeyboardMarkup(
-            keyboard=[list(map(KeyboardButton, row)) for row in durations] + [[KeyboardButton(text="Отмена")]],
+            keyboard=[
+                [KeyboardButton(text=label) for label in row] for row in durations
+            ] + [[KeyboardButton(text="Отмена")]],
             resize_keyboard=True
         )
         state["step"] = "sub2_duration"
         await message.answer("Выберите срок подписки:", reply_markup=kb)
         return
-
     if step == "sub2_duration":
         v = message.text
         if data["subscription_2"]["type"] == "EA Play" and v not in ("1м", "12м"):
@@ -424,7 +390,6 @@ async def add_flow(message: types.Message):
         state["step"] = "sub2_start"
         await message.answer("Введите дату оформления второй подписки (дд.мм.гггг):")
         return
-
     if step == "sub2_start":
         try:
             dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
@@ -444,7 +409,6 @@ async def add_flow(message: types.Message):
         except Exception:
             await message.answer("Введите дату в формате дд.мм.гггг")
             return
-
     if step == "games_ask":
         if message.text == "Есть игры":
             data["games"] = []
@@ -471,7 +435,6 @@ async def add_flow(message: types.Message):
             )
             await message.answer("Есть ли резерв-коды?", reply_markup=kb)
             return
-
     if step == "games":
         if message.text == "Закончить ввод игр":
             state["step"] = "reserve_ask"
@@ -488,7 +451,6 @@ async def add_flow(message: types.Message):
         data.setdefault("games", []).append(message.text.strip())
         await message.answer("Добавлено. Введите следующую игру или нажмите 'Закончить ввод игр'.")
         return
-
     if step == "reserve_ask":
         if message.text == "Есть резерв-коды":
             state["step"] = "reserve_photo"
@@ -496,7 +458,6 @@ async def add_flow(message: types.Message):
             return
         if message.text == "Нет резерв-кодов":
             data["reserve_codes"] = []
-            # Завершаем!
             client = data.copy()
             client["id"] = get_next_client_id(load_db())
             save_new_client(client)
@@ -505,7 +466,6 @@ async def add_flow(message: types.Message):
             await message.answer(format_client_info(client))
             await cmd_start(message)
             return
-
     if step == "reserve_photo":
         await message.answer("Ожидаю фото.")
         return
@@ -517,7 +477,6 @@ async def handle_photo(message: types.Message):
         data = state["data"]
         photo_id = message.photo[-1].file_id
         data.setdefault("reserve_codes", []).append(photo_id)
-        # Завершаем!
         client = data.copy()
         client["id"] = get_next_client_id(load_db())
         save_new_client(client)
@@ -531,8 +490,6 @@ def save_new_client(client):
     clients.append(client)
     save_db(clients)
 
-# --- Поиск ---
-
 @dp.message(F.text == "🔎 Поиск")
 async def search_start(message: types.Message):
     await message.answer("Введите номер телефона или @username клиента для поиска:")
@@ -543,30 +500,28 @@ async def search_flow(message: types.Message):
         client = find_client(message.text.strip())
         if client:
             await message.answer(format_client_info(client))
-            # TODO: добавить кнопки редактирования, удаления
         else:
             await message.answer("Клиент не найден.")
-
-# --- Уведомления ---
 
 async def notify_subs_and_birthdays():
     while True:
         clients = load_db()
         today = datetime.now()
-        # Завтра заканчивается подписка
         tomorrow = (today + timedelta(days=1)).strftime("%d.%m.%Y")
         for c in clients:
             for i in (1, 2):
                 sub = c.get(f"subscription_{i}", {})
                 if sub and sub.get("end_date") == tomorrow:
                     await bot.send_message(ADMIN_ID, f"У клиента {c['contact']} завтра заканчивается подписка: {sub['type']}")
-        # День рождения
         for c in clients:
             if c.get("birth_date"):
-                bdate = datetime.strptime(c["birth_date"], "%d.%m.%Y")
-                if bdate.day == today.day and bdate.month == today.month:
-                    await bot.send_message(ADMIN_ID, f"Сегодня день рождения у клиента: {c['contact']}")
-        await asyncio.sleep(60 * 60 * 6)  # Проверять каждые 6 часов
+                try:
+                    bdate = datetime.strptime(c["birth_date"], "%d.%m.%Y")
+                    if bdate.day == today.day and bdate.month == today.month:
+                        await bot.send_message(ADMIN_ID, f"Сегодня день рождения у клиента: {c['contact']}")
+                except:
+                    continue
+        await asyncio.sleep(60 * 60 * 6)
 
 async def main():
     asyncio.create_task(notify_subs_and_birthdays())
