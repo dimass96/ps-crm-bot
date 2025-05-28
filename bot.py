@@ -507,8 +507,9 @@ async def reserve_photo(message: types.Message, state: FSMContext):
 
 async def finish_client(message: types.Message, state: FSMContext):
     data = await state.get_data()
+    edit_id = data.get("edit_id")
     client = {
-        "id": get_next_client_id(load_db()),
+        "id": edit_id if edit_id else get_next_client_id(load_db()),
         "contact": data.get("contact", ""),
         "birth_date": data.get("birth_date", "отсутствует"),
         "account": data.get("account", {}),
@@ -518,7 +519,10 @@ async def finish_client(message: types.Message, state: FSMContext):
         "games": data.get("games", []),
         "reserve_photo_id": data.get("reserve_photo_id", None),
     }
-    save_new_client(client)
+    if edit_id:
+        update_client(edit_id, client)
+    else:
+        save_new_client(client)
     await state.clear()
     if client.get("reserve_photo_id"):
         msg = await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0], reply_markup=edit_keyboard(client))
@@ -600,8 +604,23 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(AddEditClient.edit_reserve)
         return
     if field == "sub":
-        await callback.message.answer("Запустите мастер подписки заново для редактирования.")
-        # Можно реализовать запуск сценария подписки заново!
+        # Сохраняем все текущие данные в FSM, чтобы вернуть после подписки
+        await state.update_data(
+            contact=client.get("contact", ""),
+            birth_date=client.get("birth_date", "отсутствует"),
+            account=client.get("account", {}),
+            region=client.get("region", ""),
+            console=client.get("console", ""),
+            games=client.get("games", []),
+            reserve_photo_id=client.get("reserve_photo_id", None),
+            edit_id=cid
+        )
+        msg = await callback.message.answer("Сколько подписок?", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Одна"), KeyboardButton(text="Две")],
+                [KeyboardButton(text="❌ Отмена")]
+            ], resize_keyboard=True))
+        await state.set_state(AddEditClient.subscriptions_count)
         return
     if field == "games":
         msg = await callback.message.answer("Введи список игр (каждая с новой строки):", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
