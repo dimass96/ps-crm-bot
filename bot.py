@@ -1,8 +1,8 @@
 import asyncio
-import logging
 import os
 import json
 from datetime import datetime, timedelta
+import logging
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -44,22 +44,14 @@ def find_client(query):
             return client
     return None
 
-def update_client(client):
+def save_new_client(client):
     clients = load_db()
-    for i, c in enumerate(clients):
-        if c["id"] == client["id"]:
-            clients[i] = client
-            save_db(clients)
-            return
-
-def delete_client(client_id):
-    clients = load_db()
-    clients = [c for c in clients if c["id"] != client_id]
+    clients.append(client)
     save_db(clients)
 
 def format_client_info(client):
     lines = []
-    contact = client["contact"]
+    contact = client.get("contact", "—")
     bdate = client.get("birth_date") or "—"
     console = client.get("console", "—")
     lines.append(f"📱 <b>{contact}</b> | {bdate} <b>({console})</b>")
@@ -140,6 +132,7 @@ async def add_flow(message: types.Message):
         return
     step = state["step"]
     data = state["data"]
+
     if step == "contact":
         data["contact"] = message.text.strip()
         state["step"] = "birth_ask"
@@ -153,6 +146,7 @@ async def add_flow(message: types.Message):
         )
         await message.answer("Есть ли дата рождения клиента?", reply_markup=kb)
         return
+
     if step == "birth_ask":
         if message.text == "Есть дата рождения":
             state["step"] = "birth_date"
@@ -173,6 +167,7 @@ async def add_flow(message: types.Message):
             return
         await message.answer("Выберите 'Есть дата рождения' или 'Нет даты рождения'.")
         return
+
     if step == "birth_date":
         try:
             dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
@@ -191,6 +186,7 @@ async def add_flow(message: types.Message):
         except Exception:
             await message.answer("Введите дату в формате дд.мм.гггг")
             return
+
     if step == "console":
         if message.text not in ("PS4", "PS5", "PS4/PS5"):
             await message.answer("Выберите консоль кнопкой.")
@@ -199,16 +195,19 @@ async def add_flow(message: types.Message):
         state["step"] = "account_login"
         await message.answer("Введите ЛОГИН от аккаунта:")
         return
+
     if step == "account_login":
         data["account_login"] = message.text.strip()
         state["step"] = "account_password"
         await message.answer("Введите ПАРОЛЬ от аккаунта:")
         return
+
     if step == "account_password":
         data["account_password"] = message.text.strip()
         state["step"] = "mail_password"
         await message.answer("Введите ПАРОЛЬ от почты (или '-' если нет):")
         return
+
     if step == "mail_password":
         data["mail_password"] = message.text.strip() if message.text.strip() != "-" else ""
         state["step"] = "region"
@@ -223,6 +222,7 @@ async def add_flow(message: types.Message):
         )
         await message.answer("Выберите регион аккаунта:", reply_markup=kb)
         return
+
     if step == "region":
         if message.text not in ("укр", "тур", "польша", "британия", "другой"):
             await message.answer("Выберите регион кнопкой.")
@@ -240,6 +240,7 @@ async def add_flow(message: types.Message):
         )
         await message.answer("Сколько подписок у клиента?", reply_markup=kb)
         return
+
     if step == "subs_ask":
         data["subscription_1"] = {}
         data["subscription_2"] = {}
@@ -285,6 +286,7 @@ async def add_flow(message: types.Message):
         else:
             await message.answer("Выберите количество подписок кнопкой.")
             return
+
     if step == "sub1_type":
         v = message.text
         if v not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play"):
@@ -304,6 +306,7 @@ async def add_flow(message: types.Message):
         state["step"] = "sub1_duration"
         await message.answer("Выберите срок подписки:", reply_markup=kb)
         return
+
     if step == "sub1_duration":
         v = message.text
         if data["subscription_1"]["type"] == "EA Play" and v not in ("1м", "12м"):
@@ -316,6 +319,7 @@ async def add_flow(message: types.Message):
         state["step"] = "sub1_start"
         await message.answer("Введите дату оформления подписки (дд.мм.гггг):")
         return
+
     if step == "sub1_start":
         try:
             dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
@@ -356,6 +360,7 @@ async def add_flow(message: types.Message):
         except Exception:
             await message.answer("Введите дату в формате дд.мм.гггг")
             return
+
     if step == "sub2_type":
         v = message.text
         if data["subscription_1"]["type"] == "EA Play" and v not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"):
@@ -378,6 +383,7 @@ async def add_flow(message: types.Message):
         state["step"] = "sub2_duration"
         await message.answer("Выберите срок подписки:", reply_markup=kb)
         return
+
     if step == "sub2_duration":
         v = message.text
         if data["subscription_2"]["type"] == "EA Play" and v not in ("1м", "12м"):
@@ -390,6 +396,7 @@ async def add_flow(message: types.Message):
         state["step"] = "sub2_start"
         await message.answer("Введите дату оформления второй подписки (дд.мм.гггг):")
         return
+
     if step == "sub2_start":
         try:
             dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
@@ -409,6 +416,7 @@ async def add_flow(message: types.Message):
         except Exception:
             await message.answer("Введите дату в формате дд.мм.гггг")
             return
+
     if step == "games_ask":
         if message.text == "Есть игры":
             data["games"] = []
@@ -435,6 +443,7 @@ async def add_flow(message: types.Message):
             )
             await message.answer("Есть ли резерв-коды?", reply_markup=kb)
             return
+
     if step == "games":
         if message.text == "Закончить ввод игр":
             state["step"] = "reserve_ask"
@@ -451,6 +460,7 @@ async def add_flow(message: types.Message):
         data.setdefault("games", []).append(message.text.strip())
         await message.answer("Добавлено. Введите следующую игру или нажмите 'Закончить ввод игр'.")
         return
+
     if step == "reserve_ask":
         if message.text == "Есть резерв-коды":
             state["step"] = "reserve_photo"
@@ -466,8 +476,9 @@ async def add_flow(message: types.Message):
             await message.answer(format_client_info(client))
             await cmd_start(message)
             return
+
     if step == "reserve_photo":
-        await message.answer("Ожидаю фото.")
+        await message.answer("Пожалуйста, отправьте фото резерв-кодов одним сообщением.")
         return
 
 @dp.message(F.photo)
@@ -484,11 +495,6 @@ async def handle_photo(message: types.Message):
         await message.answer("Клиент добавлен!", reply_markup=ReplyKeyboardRemove())
         await message.answer(format_client_info(client))
         await cmd_start(message)
-
-def save_new_client(client):
-    clients = load_db()
-    clients.append(client)
-    save_db(clients)
 
 @dp.message(F.text == "🔎 Поиск")
 async def search_start(message: types.Message):
