@@ -1,3 +1,4 @@
+# --- IMPORTS & GLOBALS ---
 import asyncio
 import os
 import json
@@ -26,7 +27,6 @@ dp = Dispatcher()
 scheduler = AsyncIOScheduler()
 
 # --- DB HELPERS ---
-
 def load_db():
     if not os.path.exists(DB_FILE):
         return []
@@ -63,7 +63,6 @@ def update_client(client):
             clients[i] = client
             save_db(clients)
             return
-    # not found — append
     clients.append(client)
     save_db(clients)
 
@@ -73,7 +72,6 @@ def delete_client(client_id):
     save_db(clients)
 
 # --- FSM STATES ---
-
 class AddEditClient(StatesGroup):
     contact = State()
     birthdate_yesno = State()
@@ -103,12 +101,12 @@ class AddEditClient(StatesGroup):
     edit_subs_master = State()
 
 # --- BUTTONS & UI ---
-
 def region_btns():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="укр"), KeyboardButton(text="тур")],
-            [KeyboardButton(text="другой")],
+            [KeyboardButton(text="(укр)"), KeyboardButton(text="(тур)")],
+            [KeyboardButton(text="(польша)"), KeyboardButton(text="(британия)")],
+            [KeyboardButton(text="(другой)")],
             [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True
     )
@@ -155,11 +153,12 @@ def format_card(client, show_photo_id=False):
     password = acc.get("password", "")
     mail_pass = acc.get("mail_pass", "")
     if login:
-        lines.append(f"🔐 <b>{login}</b>; {password}")
+        if password:
+            lines.append(f"🔐 <b>{login}</b>; {password}")
+        else:
+            lines.append(f"🔐 <b>{login}</b>")
     if mail_pass:
-        lines.append(f"✉️ Почта-пароль:\n{mail_pass}")
-    else:
-        lines.append(f"✉️ Почта-пароль:")
+        lines.append(f"✉️ Почта-пароль: {mail_pass}")
     subs = client.get("subscriptions", [])
     for sub in subs:
         if sub.get("name") != "отсутствует":
@@ -168,7 +167,7 @@ def format_card(client, show_photo_id=False):
     if subs and subs[0].get("name") == "отсутствует":
         lines.append(f"\n<b>Подписка:</b> отсутствует")
     region = client.get("region", "—")
-    lines.append(f"\n🌍 Регион: ({region})")
+    lines.append(f"\n🌍 Регион: {region}")
     games = client.get("games", [])
     if games:
         lines.append("\n🎮 Игры:")
@@ -190,7 +189,6 @@ async def clear_chat(message: types.Message):
         pass
 
 # --- СТАРТ ---
-
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -201,7 +199,6 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await message.answer("Главное меню", reply_markup=main_menu())
 
 # --- ДОБАВЛЕНИЕ КЛИЕНТА ---
-
 @dp.message(F.text == "➕ Добавить клиента")
 async def add_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -289,7 +286,7 @@ async def step_region(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    if message.text not in ("укр", "тур", "другой"):
+    if message.text not in ("(укр)", "(тур)", "(польша)", "(британия)", "(другой)"):
         await message.answer("Нажмите кнопку!")
         return
     await state.update_data(region=message.text)
@@ -441,16 +438,12 @@ async def sub1_start(message: types.Message, state: FSMContext):
     data = await state.get_data()
     duration = data.get("sub_1_duration")
     months = int(duration.replace("м", ""))
-    end = (start.replace(day=1) + timedelta(days=32 * months))
-    end = start.replace(month=(start.month + months - 1) % 12 + 1)
     try:
-        # Корректный переход по месяцам (end = start + months)
         year = start.year + (start.month - 1 + months) // 12
         month = (start.month - 1 + months) % 12 + 1
         day = start.day
         end = start.replace(year=year, month=month, day=day)
     except:
-        # Фолбэк на следующий месяц/год
         end = start + timedelta(days=months*30)
     sub = {
         "name": data.get("sub_1_type"),
@@ -474,7 +467,6 @@ async def sub2_type(message: types.Message, state: FSMContext):
         await start_cmd(message, state)
         return
     if message.text == "Нет подписки":
-        # вторая подписка отсутствует — сохранить первую
         data = await state.get_data()
         await state.update_data(subscriptions=[data.get("sub_1")])
         await ask_games(message, state)
@@ -549,7 +541,6 @@ async def sub2_start(message: types.Message, state: FSMContext):
     await ask_games(message, state)
 
 # --- ДОБАВЛЕНИЕ: ИГРЫ, РЕЗЕРВНЫЕ КОДЫ, ФИНАЛ ---
-
 async def ask_games(message, state: FSMContext):
     await message.answer("Оформлены игры?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
@@ -654,7 +645,6 @@ async def finish_client(message: types.Message, state: FSMContext):
     except: pass
 
 # --- ПОИСК КЛИЕНТА ---
-
 @dp.message(F.text == "🔍 Найти клиента")
 async def search_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -684,7 +674,6 @@ async def search_choose(message: types.Message, state: FSMContext):
         msg = await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
 
 # --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ ---
-
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     act, field, cid = callback.data.split("_", 2)
@@ -727,7 +716,6 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(AddEditClient.edit_reserve)
         return
     if field == "sub":
-        # Мастер подписки как при добавлении
         await state.set_state(AddEditClient.edit_subs_master)
         await callback.message.answer("Сколько подписок?", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
@@ -742,7 +730,6 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         return
 
 # --- РЕДАКТИРОВАНИЕ ПОЛЕЙ ---
-
 @dp.message(AddEditClient.edit_input)
 async def edit_input_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
@@ -833,7 +820,6 @@ async def edit_reserve_handler(message: types.Message, state: FSMContext):
     await state.clear()
 
 # --- МАСТЕР ПОДПИСКИ ПРИ РЕДАКТИРОВАНИИ ---
-
 @dp.message(AddEditClient.edit_subs_master)
 async def edit_subs_master(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
@@ -868,7 +854,6 @@ async def edit_subs_master(message: types.Message, state: FSMContext):
     await state.set_state(AddEditClient.sub_1_type)
 
 # --- СОХРАНИТЬ ---
-
 @dp.callback_query(F.data.startswith("save_"))
 async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -876,7 +861,6 @@ async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
 
 # --- ВЫГРУЗКА БАЗЫ ---
-
 @dp.message(F.text.in_({"Выгрузить базу", "выгрузить базу", "dump"}))
 async def dump_db(message: types.Message):
     clients = load_db()
@@ -886,7 +870,6 @@ async def dump_db(message: types.Message):
     os.remove("clients_dump.json")
 
 # --- ФИНАЛ ---
-
 async def main():
     scheduler.start()
     await dp.start_polling(bot)
