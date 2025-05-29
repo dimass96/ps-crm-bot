@@ -1,87 +1,65 @@
 import asyncio
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from cryptography.fernet import Fernet
 
 DB_FILE = "clients_db.json"
-KEY_FILE = "secret.key"
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
 
-# --- ШИФРОВАНИЕ БД И БЭКАП ---
-def generate_key():
-    if not os.path.exists(KEY_FILE):
-        key = Fernet.generate_key()
-        with open(KEY_FILE, "wb") as f:
-            f.write(key)
+bot = Bot(
+    token=API_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+dp = Dispatcher()
+scheduler = AsyncIOScheduler()
 
-def load_key():
-    with open(KEY_FILE, "rb") as f:
-        return f.read()
-
-def encrypt_data(data: str, key: bytes) -> bytes:
-    return Fernet(key).encrypt(data.encode())
-
-def decrypt_data(token: bytes, key: bytes) -> str:
-    return Fernet(key).decrypt(token).decode()
-
-generate_key()
-ENCRYPT_KEY = load_key()
+# --- DB HELPERS ---
 
 def load_db():
     if not os.path.exists(DB_FILE):
         return []
-    with open(DB_FILE, "rb") as f:
+    with open(DB_FILE, "r", encoding="utf-8") as f:
         try:
-            encrypted = f.read()
-            if not encrypted:
-                return []
-            decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
-            return json.loads(decrypted)
+            return json.load(f)
         except Exception:
             return []
 
 def save_db(data):
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
-            backup.write(orig.read())
-    encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
-    with open(DB_FILE, "wb") as f:
-        f.write(encrypted)
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def get_next_client_id(clients):
     if not clients: return 1
     return max(c["id"] for c in clients) + 1
 
-def find_clients(query):
+def find_clients_by_any(query):
+    query = query.strip().lower()
     clients = load_db()
-    results = []
-    q = query.lower()
+    found = []
     for c in clients:
-        if (q in str(c.get("contact", "")).lower() or
-            q in str(c.get("birth_date", "")).lower() or
-            q in str(c.get("region", "")).lower() or
-            q in str(c.get("console", "")).lower() or
-            any(q in str(val).lower() for val in c.get("games", [])) or
-            q in str(c.get("account", {}).get("login", "")).lower() or
-            q in str(c.get("account", {}).get("password", "")).lower() or
-            q in str(c.get("account", {}).get("mail_pass", "")).lower() or
-            any(q in str(sub.get("name", "")).lower() or q in str(sub.get("duration", "")).lower() for sub in c.get("subscriptions", []))
-        ):
-            results.append(c)
-    return results
+        text = json.dumps(c, ensure_ascii=False).lower()
+        if query in text:
+            found.append(c)
+    return found
+
+def find_client(query):
+    clients = load_db()
+    for c in clients:
+        if c.get("contact", "").strip() == query.strip():
+            return c
+    return None
 
 def save_new_client(client):
     clients = load_db()
@@ -104,6 +82,7 @@ def delete_client(client_id):
     save_db(clients)
 
 # --- FSM STATES ---
+
 class AddEditClient(StatesGroup):
     contact = State()
     birthdate_yesno = State()
@@ -140,6 +119,7 @@ class AddEditClient(StatesGroup):
     edit_sub_2_start = State()
 
 # --- BUTTONS & UI ---
+
 def region_btns():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -160,23 +140,22 @@ def console_btns():
     )
 
 def edit_keyboard(client):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📱 Изменить номер-TG", callback_data=f"edit_contact_{client['id']}"),
-            InlineKeyboardButton(text="🔐 Изменить данные", callback_data=f"edit_account_{client['id']}"),
-            InlineKeyboardButton(text="💳 Изменить подписку", callback_data=f"edit_sub_{client['id']}"),
-            InlineKeyboardButton(text="🎲 Изменить игры", callback_data=f"edit_games_{client['id']}"),
-        ],
-        [
-            InlineKeyboardButton(text="🖼 Изменить резерв-коды", callback_data=f"edit_reserve_{client['id']}"),
-            InlineKeyboardButton(text="🎮 Изменить консоль", callback_data=f"edit_console_{client['id']}"),
-            InlineKeyboardButton(text="📅 Изменить дату рождения", callback_data=f"edit_birth_{client['id']}"),
-            InlineKeyboardButton(text="🌍 Изменить регион", callback_data=f"edit_region_{client['id']}"),
-        ],
-        [
-            InlineKeyboardButton(text="✅ Сохранить", callback_data=f"save_{client['id']}")
-        ]
-    ])
+    buttons = [
+        InlineKeyboardButton(text="📱 Изменить номер", callback_data=f"edit_contact_{client['id']}"),
+        InlineKeyboardButton(text="🔐 Изменить данные", callback_data=f"edit_account_{client['id']}"),
+        InlineKeyboardButton(text="💳 Изменить подписку", callback_data=f"edit_sub_{client['id']}"),
+        InlineKeyboardButton(text="🎮 Изменить игры", callback_data=f"edit_games_{client['id']}"),
+        InlineKeyboardButton(text="🖼 Изменить резерв-коды", callback_data=f"edit_reserve_{client['id']}"),
+        InlineKeyboardButton(text="🎲 Изменить консоль", callback_data=f"edit_console_{client['id']}"),
+        InlineKeyboardButton(text="📅 Изменить дату рождения", callback_data=f"edit_birth_{client['id']}"),
+        InlineKeyboardButton(text="🌍 Изменить регион", callback_data=f"edit_region_{client['id']}")
+    ]
+    keyboard = [
+        buttons[:4],
+        buttons[4:8],
+        [InlineKeyboardButton(text="✅ Сохранить", callback_data=f"save_{client['id']}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def main_menu():
     return ReplyKeyboardMarkup(
@@ -233,12 +212,6 @@ async def clear_chat(message: types.Message):
         pass
 
 # --- СТАРТ ---
-bot = Bot(
-    token=API_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher()
-scheduler = AsyncIOScheduler()
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
@@ -250,6 +223,7 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await message.answer("Главное меню", reply_markup=main_menu())
 
 # --- ДОБАВЛЕНИЕ КЛИЕНТА ---
+
 @dp.message(F.text == "➕ Добавить клиента")
 async def add_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -696,12 +670,13 @@ async def finish_client(message: types.Message, state: FSMContext):
         await bot.delete_message(msg.chat.id, msg.message_id)
     except: pass
 
-# --- ПОИСК КЛИЕНТА ---
+# --- ПОИСК КЛИЕНТА (универсальный по любой информации) ---
+
 @dp.message(F.text == "🔍 Найти клиента")
 async def search_start(message: types.Message, state: FSMContext):
     await state.clear()
     await clear_chat(message)
-    await message.answer("Введите запрос для поиска (номер, логин, игра и т.д.):",
+    await message.answer("Введите запрос для поиска по всей базе (можно логин, игру, что угодно):",
         reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.edit_choose)
 
@@ -713,20 +688,21 @@ async def search_choose(message: types.Message, state: FSMContext):
         await start_cmd(message, state)
         return
     query = message.text.strip()
-    clients = find_clients(query)
-    if not clients:
-        await message.answer("Клиентов не найдено.")
+    results = find_clients_by_any(query)
+    if not results:
+        await message.answer("Клиент не найден.")
         await start_cmd(message, state)
         return
     await state.clear()
     await clear_chat(message)
-    for client in clients:
+    for client in results:
         if client.get("reserve_photo_id"):
             await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0], reply_markup=edit_keyboard(client))
         else:
             await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
 
-# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ (тот же блок, что был, не менялся) ---
+# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ ---
+
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     act, field, cid = callback.data.split("_", 2)
@@ -781,62 +757,6 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("Введи список игр (каждая с новой строки):", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
         await state.set_state(AddEditClient.edit_games)
         return
-
-# --- РЕДАКТИРОВАНИЕ ПОЛЕЙ, МАСТЕР ПОДПИСКИ, СОХРАНЕНИЕ (тот же блок, не менялся) ---
-# ... (Весь код здесь совпадает с прошлым — если нужно еще раз всю часть — скажи "Далее", отправлю полностью!)
-
-# --- ВЫГРУЗКА БАЗЫ ---
-@dp.message(F.text.in_({"Выгрузить базу", "выгрузить базу", "dump"}))
-async def dump_db(message: types.Message, state: FSMContext):
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Выгрузить в диалог"), KeyboardButton(text="Выгрузить файлом")],
-            [KeyboardButton(text="❌ Отмена")]
-        ], resize_keyboard=True)
-    await message.answer("Выбери способ выгрузки:", reply_markup=kb)
-    await state.set_state(AddEditClient.awaiting_confirm)
-
-@dp.message(AddEditClient.awaiting_confirm)
-async def dump_choose(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await state.clear()
-        await clear_chat(message)
-        await start_cmd(message, state)
-        return
-    if message.text == "Выгрузить в диалог":
-        clients = load_db()
-        await state.clear()
-        await clear_chat(message)
-        if not clients:
-            await message.answer("База пуста!")
-            await start_cmd(message, state)
-            return
-        for client in clients:
-            if client.get("reserve_photo_id"):
-                await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0])
-            else:
-                await message.answer(format_card(client)[0])
-        await start_cmd(message, state)
-        return
-    if message.text == "Выгрузить файлом":
-        clients = load_db()
-        tmp_path = "clients_export.json"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(clients, f, ensure_ascii=False, indent=2)
-        await bot.send_document(message.chat.id, InputFile(tmp_path))
-        os.remove(tmp_path)
-        await state.clear()
-        await start_cmd(message, state)
-        return
-    await message.answer("Нажми кнопку!")
-
-# --- ЗАПУСК ---
-async def main():
-    scheduler.start()
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 # --- РЕДАКТИРОВАНИЕ ПОЛЕЙ ---
 
@@ -1164,3 +1084,45 @@ async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await clear_chat(callback.message)
     await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
+
+# --- ВЫГРУЗКА БАЗЫ ---
+
+@dp.message(F.text == "Выгрузить базу")
+async def dump_menu(message: types.Message):
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Выгрузить в диалог"), KeyboardButton(text="Выгрузить файлом")],
+            [KeyboardButton(text="❌ Отмена")]
+        ], resize_keyboard=True
+    )
+    await message.answer("Выберите способ выгрузки базы:", reply_markup=kb)
+
+@dp.message(F.text == "Выгрузить в диалог")
+async def dump_dialog(message: types.Message):
+    clients = load_db()
+    if not clients:
+        await message.answer("База пуста.")
+        return
+    for client in clients:
+        if client.get("reserve_photo_id"):
+            await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0], reply_markup=edit_keyboard(client))
+        else:
+            await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
+
+@dp.message(F.text == "Выгрузить файлом")
+async def dump_file(message: types.Message):
+    clients = load_db()
+    filename = "clients_dump.json"
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(clients, f, ensure_ascii=False, indent=2)
+    await bot.send_document(message.chat.id, InputFile(filename))
+    os.remove(filename)
+
+# --- ФИНАЛ ---
+
+async def main():
+    scheduler.start()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
