@@ -1,3 +1,4 @@
 aiogram==3.4.1
 pyAesCrypt==6.0.0
 python-dateutil
+apscheduler
