@@ -1,4 +1,3 @@
-# --- IMPORTS & GLOBALS ---
 import asyncio
 import os
 import json
@@ -27,6 +26,7 @@ dp = Dispatcher()
 scheduler = AsyncIOScheduler()
 
 # --- DB HELPERS ---
+
 def load_db():
     if not os.path.exists(DB_FILE):
         return []
@@ -72,6 +72,7 @@ def delete_client(client_id):
     save_db(clients)
 
 # --- FSM STATES ---
+
 class AddEditClient(StatesGroup):
     contact = State()
     birthdate_yesno = State()
@@ -101,12 +102,13 @@ class AddEditClient(StatesGroup):
     edit_subs_master = State()
 
 # --- BUTTONS & UI ---
+
 def region_btns():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="(укр)"), KeyboardButton(text="(тур)")],
-            [KeyboardButton(text="(польша)"), KeyboardButton(text="(британия)")],
-            [KeyboardButton(text="(другой)")],
+            [KeyboardButton(text="укр"), KeyboardButton(text="тур")],
+            [KeyboardButton(text="польша"), KeyboardButton(text="британия")],
+            [KeyboardButton(text="другой")],
             [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True
     )
@@ -153,12 +155,11 @@ def format_card(client, show_photo_id=False):
     password = acc.get("password", "")
     mail_pass = acc.get("mail_pass", "")
     if login:
-        if password:
-            lines.append(f"🔐 <b>{login}</b>; {password}")
-        else:
-            lines.append(f"🔐 <b>{login}</b>")
+        lines.append(f"🔐 <b>{login}</b>; {password}")
     if mail_pass:
         lines.append(f"✉️ Почта-пароль: {mail_pass}")
+    else:
+        lines.append(f"✉️ Почта-пароль:")
     subs = client.get("subscriptions", [])
     for sub in subs:
         if sub.get("name") != "отсутствует":
@@ -167,7 +168,7 @@ def format_card(client, show_photo_id=False):
     if subs and subs[0].get("name") == "отсутствует":
         lines.append(f"\n<b>Подписка:</b> отсутствует")
     region = client.get("region", "—")
-    lines.append(f"\n🌍 Регион: {region}")
+    lines.append(f"\n🌍 Регион: ({region})")
     games = client.get("games", [])
     if games:
         lines.append("\n🎮 Игры:")
@@ -189,6 +190,7 @@ async def clear_chat(message: types.Message):
         pass
 
 # --- СТАРТ ---
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -199,6 +201,7 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await message.answer("Главное меню", reply_markup=main_menu())
 
 # --- ДОБАВЛЕНИЕ КЛИЕНТА ---
+
 @dp.message(F.text == "➕ Добавить клиента")
 async def add_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -286,7 +289,7 @@ async def step_region(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    if message.text not in ("(укр)", "(тур)", "(польша)", "(британия)", "(другой)"):
+    if message.text not in ("укр", "тур", "польша", "британия", "другой"):
         await message.answer("Нажмите кнопку!")
         return
     await state.update_data(region=message.text)
@@ -541,6 +544,7 @@ async def sub2_start(message: types.Message, state: FSMContext):
     await ask_games(message, state)
 
 # --- ДОБАВЛЕНИЕ: ИГРЫ, РЕЗЕРВНЫЕ КОДЫ, ФИНАЛ ---
+
 async def ask_games(message, state: FSMContext):
     await message.answer("Оформлены игры?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
@@ -645,6 +649,7 @@ async def finish_client(message: types.Message, state: FSMContext):
     except: pass
 
 # --- ПОИСК КЛИЕНТА ---
+
 @dp.message(F.text == "🔍 Найти клиента")
 async def search_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -669,11 +674,14 @@ async def search_choose(message: types.Message, state: FSMContext):
     await state.clear()
     await clear_chat(message)
     if client.get("reserve_photo_id"):
-        msg = await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0], reply_markup=edit_keyboard(client))
+        await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0], reply_markup=edit_keyboard(client))
     else:
-        msg = await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
+        await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
+
+# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ + МАСТЕР ПОДПИСКИ РЕДАКТИРОВАНИЯ ---
 
 # --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ ---
+
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     act, field, cid = callback.data.split("_", 2)
@@ -717,12 +725,16 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         return
     if field == "sub":
         await state.set_state(AddEditClient.edit_subs_master)
-        await callback.message.answer("Сколько подписок?", reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Одна"), KeyboardButton(text="Две")],
-                [KeyboardButton(text="Нет подписки")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True))
+        await callback.message.answer(
+            "Сколько подписок?",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Одна"), KeyboardButton(text="Две")],
+                    [KeyboardButton(text="Нет подписки")],
+                    [KeyboardButton(text="❌ Отмена")]
+                ], resize_keyboard=True
+            )
+        )
         return
     if field == "games":
         await callback.message.answer("Введи список игр (каждая с новой строки):", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
@@ -730,6 +742,7 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         return
 
 # --- РЕДАКТИРОВАНИЕ ПОЛЕЙ ---
+
 @dp.message(AddEditClient.edit_input)
 async def edit_input_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
@@ -820,6 +833,7 @@ async def edit_reserve_handler(message: types.Message, state: FSMContext):
     await state.clear()
 
 # --- МАСТЕР ПОДПИСКИ ПРИ РЕДАКТИРОВАНИИ ---
+
 @dp.message(AddEditClient.edit_subs_master)
 async def edit_subs_master(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
@@ -827,6 +841,7 @@ async def edit_subs_master(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
+
     if message.text == "Нет подписки":
         data = await state.get_data()
         cid = data.get("edit_id")
@@ -846,14 +861,55 @@ async def edit_subs_master(message: types.Message, state: FSMContext):
         await message.answer("Ошибка при обновлении.")
         await state.clear()
         return
+
     if message.text not in ("Одна", "Две"):
         await message.answer("Нажмите кнопку!")
         return
+
     await state.update_data(edit_subs_count=message.text)
-    await sub_select(message, state, sub_num=1, only_one=(message.text == "Одна"))
-    await state.set_state(AddEditClient.sub_1_type)
+    await edit_sub_select(message, state, sub_num=1, only_one=(message.text == "Одна"))
+
+
+async def edit_sub_select(message, state: FSMContext, sub_num=1, only_one=False):
+    if sub_num == 1:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
+                [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
+                [KeyboardButton(text="Нет подписки")],
+                [KeyboardButton(text="❌ Отмена")]
+            ], resize_keyboard=True
+        )
+        await message.answer("Выберите тип подписки:", reply_markup=kb)
+        await state.set_state(AddEditClient.sub_1_type)
+        await state.update_data(is_edit=True)
+    else:
+        data = await state.get_data()
+        prev = data.get("sub_1_type")
+        kb = None
+        if prev == "EA Play":
+            kb = ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra"), KeyboardButton(text="PS Plus Essential")],
+                    [KeyboardButton(text="Нет подписки")],
+                    [KeyboardButton(text="❌ Отмена")]
+                ], resize_keyboard=True)
+        else:
+            kb = ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="EA Play")],
+                    [KeyboardButton(text="Нет подписки")],
+                    [KeyboardButton(text="❌ Отмена")]
+                ], resize_keyboard=True)
+        await message.answer("Выберите вторую подписку:", reply_markup=kb)
+        await state.set_state(AddEditClient.sub_2_type)
+        await state.update_data(is_edit=True)
+
+# Переиспользуем те же самые хендлеры sub_1_type, sub_1_duration, sub_1_start, sub_2_type, sub_2_duration, sub_2_start,
+# но теперь проверяем флаг is_edit и если он True — обновляем клиента в базе после второго шага (или первого если одна подписка)
 
 # --- СОХРАНИТЬ ---
+
 @dp.callback_query(F.data.startswith("save_"))
 async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -861,6 +917,7 @@ async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
 
 # --- ВЫГРУЗКА БАЗЫ ---
+
 @dp.message(F.text.in_({"Выгрузить базу", "выгрузить базу", "dump"}))
 async def dump_db(message: types.Message):
     clients = load_db()
@@ -870,6 +927,7 @@ async def dump_db(message: types.Message):
     os.remove("clients_dump.json")
 
 # --- ФИНАЛ ---
+
 async def main():
     scheduler.start()
     await dp.start_polling(bot)
