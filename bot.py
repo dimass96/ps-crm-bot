@@ -140,22 +140,23 @@ def console_btns():
     )
 
 def edit_keyboard(client):
-    cid = client["id"]
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📱 Изменить номер", callback_data=f"edit_contact_{cid}"),
-            InlineKeyboardButton(text="🔐 Изменить данные", callback_data=f"edit_account_{cid}"),
-            InlineKeyboardButton(text="💳 Изменить подписку", callback_data=f"edit_sub_{cid}"),
-            InlineKeyboardButton(text="🎮 Изменить игры", callback_data=f"edit_games_{cid}")
+            InlineKeyboardButton(text="📱 Номер", callback_data=f"edit_contact_{client['id']}"),
+            InlineKeyboardButton(text="🛡 Данные", callback_data=f"edit_account_{client['id']}"),
+            InlineKeyboardButton(text="💳 Подписка", callback_data=f"edit_sub_{client['id']}")
         ],
         [
-            InlineKeyboardButton(text="🖼 Изменить рез. коды", callback_data=f"edit_reserve_{cid}"),
-            InlineKeyboardButton(text="🕹 Изменить консоль", callback_data=f"edit_console_{cid}"),
-            InlineKeyboardButton(text="📅 Изменить дату рожд.", callback_data=f"edit_birth_{cid}"),
-            InlineKeyboardButton(text="🌍 Изменить регион", callback_data=f"edit_region_{cid}")
+            InlineKeyboardButton(text="🎮 Игры", callback_data=f"edit_games_{client['id']}"),
+            InlineKeyboardButton(text="🖼 Рез.коды", callback_data=f"edit_reserve_{client['id']}"),
+            InlineKeyboardButton(text="🕹 Консоль", callback_data=f"edit_console_{client['id']}")
         ],
         [
-            InlineKeyboardButton(text="✅ Сохранить", callback_data=f"save_{cid}")
+            InlineKeyboardButton(text="📅 Д.рожд.", callback_data=f"edit_birth_{client['id']}"),
+            InlineKeyboardButton(text="🌍 Регион", callback_data=f"edit_region_{client['id']}")
+        ],
+        [
+            InlineKeyboardButton(text="✅ Сохранить", callback_data=f"save_{client['id']}")
         ]
     ])
 
