@@ -1,65 +1,87 @@
 import asyncio
 import os
 import json
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from cryptography.fernet import Fernet
 
-DB_FILE = "clients_db.json"
+DB_FILE = "/data/clients_db.json"  # Здесь путь на volume!
+KEY_FILE = "/data/secret.key"      # Ключ тоже храним на volume!
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
 
-bot = Bot(
-    token=API_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher()
-scheduler = AsyncIOScheduler()
+# --- ШИФРОВАНИЕ БД И БЭКАП ---
+def generate_key():
+    if not os.path.exists(KEY_FILE):
+        key = Fernet.generate_key()
+        with open(KEY_FILE, "wb") as f:
+            f.write(key)
 
-# --- DB HELPERS ---
+def load_key():
+    with open(KEY_FILE, "rb") as f:
+        return f.read()
+
+def encrypt_data(data: str, key: bytes) -> bytes:
+    return Fernet(key).encrypt(data.encode())
+
+def decrypt_data(token: bytes, key: bytes) -> str:
+    return Fernet(key).decrypt(token).decode()
+
+generate_key()
+ENCRYPT_KEY = load_key()
 
 def load_db():
     if not os.path.exists(DB_FILE):
         return []
-    with open(DB_FILE, "r", encoding="utf-8") as f:
+    with open(DB_FILE, "rb") as f:
         try:
-            return json.load(f)
+            encrypted = f.read()
+            if not encrypted:
+                return []
+            decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
+            return json.loads(decrypted)
         except Exception:
             return []
 
 def save_db(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
+            backup.write(orig.read())
+    encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
+    with open(DB_FILE, "wb") as f:
+        f.write(encrypted)
 
 def get_next_client_id(clients):
     if not clients: return 1
     return max(c["id"] for c in clients) + 1
 
-def find_clients_by_any(query):
-    query = query.strip().lower()
+def find_clients(query):
     clients = load_db()
-    found = []
+    results = []
+    q = query.lower()
     for c in clients:
-        text = json.dumps(c, ensure_ascii=False).lower()
-        if query in text:
-            found.append(c)
-    return found
-
-def find_client(query):
-    clients = load_db()
-    for c in clients:
-        if c.get("contact", "").strip() == query.strip():
-            return c
-    return None
+        if (q in str(c.get("contact", "")).lower() or
+            q in str(c.get("birth_date", "")).lower() or
+            q in str(c.get("region", "")).lower() or
+            q in str(c.get("console", "")).lower() or
+            any(q in str(val).lower() for val in c.get("games", [])) or
+            q in str(c.get("account", {}).get("login", "")).lower() or
+            q in str(c.get("account", {}).get("password", "")).lower() or
+            q in str(c.get("account", {}).get("mail_pass", "")).lower() or
+            any(q in str(sub.get("name", "")).lower() or q in str(sub.get("duration", "")).lower() for sub in c.get("subscriptions", []))
+        ):
+            results.append(c)
+    return results
 
 def save_new_client(client):
     clients = load_db()
@@ -82,7 +104,6 @@ def delete_client(client_id):
     save_db(clients)
 
 # --- FSM STATES ---
-
 class AddEditClient(StatesGroup):
     contact = State()
     birthdate_yesno = State()
@@ -119,7 +140,6 @@ class AddEditClient(StatesGroup):
     edit_sub_2_start = State()
 
 # --- BUTTONS & UI ---
-
 def region_btns():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -142,27 +162,21 @@ def console_btns():
 def edit_keyboard(client):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📱 Номер", callback_data=f"edit_contact_{client['id']}"),
-            InlineKeyboardButton(text="🛡 Данные", callback_data=f"edit_account_{client['id']}")
+            InlineKeyboardButton(text="📱 Изменить номер-TG", callback_data=f"edit_contact_{client['id']}"),
+            InlineKeyboardButton(text="🔐 Изменить данные", callback_data=f"edit_account_{client['id']}"),
+            InlineKeyboardButton(text="💳 Изменить подписку", callback_data=f"edit_sub_{client['id']}"),
+            InlineKeyboardButton(text="🎲 Изменить игры", callback_data=f"edit_games_{client['id']}"),
         ],
         [
-            InlineKeyboardButton(text="💳 Подписка", callback_data=f"edit_sub_{client['id']}"),
-            InlineKeyboardButton(text="🎮 Игры", callback_data=f"edit_games_{client['id']}")
-        ],
-        [
-            InlineKeyboardButton(text="🖼 Рез.коды", callback_data=f"edit_reserve_{client['id']}"),
-            InlineKeyboardButton(text="🕹 Консоль", callback_data=f"edit_console_{client['id']}")
-        ],
-        [
-            InlineKeyboardButton(text="📅 Д.рожд.", callback_data=f"edit_birth_{client['id']}"),
-            InlineKeyboardButton(text="🌍 Регион", callback_data=f"edit_region_{client['id']}")
+            InlineKeyboardButton(text="🖼 Изменить резерв-коды", callback_data=f"edit_reserve_{client['id']}"),
+            InlineKeyboardButton(text="🎮 Изменить консоль", callback_data=f"edit_console_{client['id']}"),
+            InlineKeyboardButton(text="📅 Изменить дату рождения", callback_data=f"edit_birth_{client['id']}"),
+            InlineKeyboardButton(text="🌍 Изменить регион", callback_data=f"edit_region_{client['id']}"),
         ],
         [
             InlineKeyboardButton(text="✅ Сохранить", callback_data=f"save_{client['id']}")
         ]
     ])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def main_menu():
     return ReplyKeyboardMarkup(
@@ -219,6 +233,12 @@ async def clear_chat(message: types.Message):
         pass
 
 # --- СТАРТ ---
+bot = Bot(
+    token=API_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+dp = Dispatcher()
+scheduler = AsyncIOScheduler()
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
@@ -228,6 +248,7 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await state.clear()
     await clear_chat(message)
     await message.answer("Главное меню", reply_markup=main_menu())
+
 
 # --- ДОБАВЛЕНИЕ КЛИЕНТА ---
 
