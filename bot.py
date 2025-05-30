@@ -55,12 +55,26 @@ def load_db():
 
 def save_db(data):
     os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+    backup_path = DB_FILE + "_backup"
+    dated_backup = f"/data/clients_db_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
-            backup.write(orig.read())
+        with open(DB_FILE, "rb") as orig:
+            content = orig.read()
+            with open(backup_path, "wb") as backup:
+                backup.write(content)
+            with open(dated_backup, "wb") as dated:
+                dated.write(content)
     encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
     with open(DB_FILE, "wb") as f:
         f.write(encrypted)
+
+def restore_db_from_backup():
+    backup_path = DB_FILE + "_backup"
+    if os.path.exists(backup_path):
+        with open(backup_path, "rb") as b, open(DB_FILE, "wb") as f:
+            f.write(b.read())
+        return True
+    return False
 
 def get_next_client_id(clients):
     if not clients: return 1
@@ -104,23 +118,69 @@ def delete_client(client_id):
     clients = [c for c in clients if c["id"] != client_id]
     save_db(clients)
 
-def auto_backup():
-    clients = load_db()
-    ts = datetime.now().strftime("%Y%m%d")
-    path = f"/data/clients_db_{ts}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
+def clear_all_clients():
+    save_db([])
 
-def restore_from_backup():
-    files = [f for f in os.listdir("/data") if f.startswith("clients_db_") and f.endswith(".json")]
-    if not files:
-        return False
-    files.sort(reverse=True)
-    path = os.path.join("/data", files[0])
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    save_db(data)
-    return True
+def get_subs_ending_soon(days=7):
+    result = []
+    now = datetime.now()
+    clients = load_db()
+    for c in clients:
+        for sub in c.get("subscriptions", []):
+            if sub.get("name") and sub.get("name") != "отсутствует":
+                try:
+                    end = datetime.strptime(sub["end"], "%d.%m.%Y")
+                    if 0 <= (end - now).days <= days:
+                        result.append((c, sub))
+                except: continue
+    return result
+
+def get_birthdays_soon(days=7):
+    result = []
+    now = datetime.now()
+    clients = load_db()
+    for c in clients:
+        bd = c.get("birth_date", "")
+        try:
+            if bd and bd != "отсутствует":
+                bd_dt = datetime.strptime(bd, "%d.%m.%Y")
+                bd_this_year = bd_dt.replace(year=now.year)
+                diff = (bd_this_year - now).days
+                if 0 <= diff <= days:
+                    result.append(c)
+        except: continue
+    return result
+
+def stats_summary():
+    clients = load_db()
+    total = len(clients)
+    with_sub = [c for c in clients if c.get("subscriptions") and c["subscriptions"][0].get("name") != "отсутствует"]
+    by_type = {"PS Plus Deluxe":0, "PS Plus Extra":0, "PS Plus Essential":0, "EA Play":0}
+    with_two = 0
+    regions = {"укр":0, "тур":0, "(польша)":0, "(британия)":0, "другой":0}
+    for c in with_sub:
+        subs = c.get("subscriptions", [])
+        if len(subs) == 2:
+            with_two += 1
+        for sub in subs:
+            if sub["name"] in by_type: by_type[sub["name"]] += 1
+    for c in clients:
+        reg = c.get("region", "")
+        if reg in regions: regions[reg] += 1
+        else: regions["другой"] += 1
+    games = sum([len(c.get("games", [])) for c in clients])
+    expiring = len(get_subs_ending_soon(7))
+    bdays = len(get_birthdays_soon(7))
+    return {
+        "total": total,
+        "with_sub": len(with_sub),
+        "by_type": by_type,
+        "with_two": with_two,
+        "regions": regions,
+        "games": games,
+        "expiring": expiring,
+        "bdays": bdays
+    }
 
 class AddEditClient(StatesGroup):
     contact = State()
@@ -145,6 +205,7 @@ class AddEditClient(StatesGroup):
     edit_choose = State()
     edit_input = State()
     edit_games = State()
+    edit_subs = State()
     edit_reserve = State()
     awaiting_confirm = State()
     edit_subs_master = State()
@@ -155,7 +216,6 @@ class AddEditClient(StatesGroup):
     edit_sub_2_type = State()
     edit_sub_2_duration = State()
     edit_sub_2_start = State()
-    awaiting_db_action = State()
     awaiting_db_confirm = State()
 
 def region_btns():
@@ -205,16 +265,7 @@ def main_menu():
         keyboard=[
             [KeyboardButton(text="➕ Добавить клиента")],
             [KeyboardButton(text="🔍 Найти клиента")],
-            [KeyboardButton(text="📦 База")]
-        ], resize_keyboard=True
-    )
-
-def db_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Выгрузка базы в чат"), KeyboardButton(text="Выгрузка базы в файл")],
-            [KeyboardButton(text="🔄 Восстановить из бэкапа"), KeyboardButton(text="🗑 Очистить базу")],
-            [KeyboardButton(text="📋 Статистика"), KeyboardButton(text="❌ Отмена")]
+            [KeyboardButton(text="📋 База")],
         ], resize_keyboard=True
     )
 
@@ -251,6 +302,16 @@ def format_card(client, show_photo_id=False):
     reserve_photo_id = client.get("reserve_photo_id")
     return "\n".join(lines), reserve_photo_id if show_photo_id else None
 
+def stats_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Заканчивается подписка (7д)"), KeyboardButton(text="Скоро ДР (7д)")],
+            [KeyboardButton(text="Выгрузить в чат"), KeyboardButton(text="Выгрузить файлом")],
+            [KeyboardButton(text="Восстановить из бэкапа"), KeyboardButton(text="Очистить базу")],
+            [KeyboardButton(text="❌ Отмена")]
+        ], resize_keyboard=True
+    )
+
 async def clear_chat(message: types.Message):
     try:
         chat = message.chat.id
@@ -278,7 +339,124 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await clear_chat(message)
     await message.answer("Главное меню", reply_markup=main_menu())
 
-# ------------------------ ДОБАВЛЕНИЕ КЛИЕНТА -------------------------
+@dp.message(F.text == "📋 База")
+async def base_menu(message: types.Message, state: FSMContext):
+    await state.clear()
+    await clear_chat(message)
+    s = stats_summary()
+    stat_lines = [
+        "<b>Статистика CRM</b>",
+        f"\n👤 Клиентов: {s['total']}",
+        f"💳 С подписками: {s['with_sub']}",
+        f"— PS Plus Deluxe: {s['by_type']['PS Plus Deluxe']}",
+        f"— PS Plus Extra: {s['by_type']['PS Plus Extra']}",
+        f"— PS Plus Essential: {s['by_type']['PS Plus Essential']}",
+        f"— EA Play: {s['by_type']['EA Play']}",
+        f"🔁 Две подписки: {s['with_two']}",
+        "",
+        f"🌍 Регионы:",
+        f"укр: {s['regions']['укр']}",
+        f"тур: {s['regions']['тур']}",
+        f"(польша): {s['regions']['(польша)']}",
+        f"(британия): {s['regions']['(британия)']}",
+        f"другой: {s['regions']['другой']}",
+        "",
+        f"🎮 Оформлено игр: {s['games']}",
+        f"⏳ Подписки истекают (7 дней): {s['expiring']}",
+        f"🎂 День рождения скоро: {s['bdays']}"
+    ]
+    await message.answer("\n".join(stat_lines), reply_markup=stats_keyboard())
+    await state.set_state(AddEditClient.awaiting_confirm)
+
+@dp.message(AddEditClient.awaiting_confirm)
+async def stats_buttons(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await clear_chat(message)
+        await start_cmd(message, state)
+        return
+    if message.text == "Выгрузить в чат":
+        clients = load_db()
+        await state.clear()
+        await clear_chat(message)
+        if not clients:
+            await message.answer("База пуста!")
+            await start_cmd(message, state)
+            return
+        for client in clients:
+            if client.get("reserve_photo_id"):
+                await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0])
+            else:
+                await message.answer(format_card(client)[0])
+        await start_cmd(message, state)
+        return
+    if message.text == "Выгрузить файлом":
+        clients = load_db()
+        tmp_path = "/data/clients_export.json"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(clients, f, ensure_ascii=False, indent=2)
+        await bot.send_document(message.chat.id, InputFile(tmp_path))
+        await state.clear()
+        await start_cmd(message, state)
+        return
+    if message.text == "Восстановить из бэкапа":
+        if restore_db_from_backup():
+            await message.answer("База восстановлена из резервной копии!")
+        else:
+            await message.answer("Бэкап не найден.")
+        await start_cmd(message, state)
+        return
+    if message.text == "Очистить базу":
+        await message.answer("Уверены, что хотите удалить всех клиентов и всю базу?", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Да"), KeyboardButton(text="Нет")]], resize_keyboard=True
+        ))
+        await state.set_state(AddEditClient.awaiting_db_confirm)
+        return
+    if message.text == "Заканчивается подписка (7д)":
+        subs = get_subs_ending_soon()
+        if not subs:
+            await message.answer("Нет клиентов с истекающими подписками в течение 7 дней.")
+        else:
+            for c, sub in subs:
+                text, _ = format_card(c)
+                text += f"\n<b>Заканчивается подписка: {sub['name']} — {sub['end']}</b>"
+                if c.get("reserve_photo_id"):
+                    await message.answer_photo(c["reserve_photo_id"], caption=text)
+                else:
+                    await message.answer(text)
+        await start_cmd(message, state)
+        return
+    if message.text == "Скоро ДР (7д)":
+        bdays = get_birthdays_soon()
+        if not bdays:
+            await message.answer("Нет клиентов с ДР в ближайшие 7 дней.")
+        else:
+            for c in bdays:
+                text, _ = format_card(c)
+                text += f"\n<b>Скоро день рождения: {c.get('birth_date')}</b>"
+                if c.get("reserve_photo_id"):
+                    await message.answer_photo(c["reserve_photo_id"], caption=text)
+                else:
+                    await message.answer(text)
+        await start_cmd(message, state)
+        return
+    await message.answer("Нажмите кнопку!")
+
+@dp.message(AddEditClient.awaiting_db_confirm)
+async def confirm_clear_db(message: types.Message, state: FSMContext):
+    if message.text == "Нет":
+        await message.answer("Очистка отменена.", reply_markup=main_menu())
+        await start_cmd(message, state)
+        return
+    if message.text == "Да":
+        clear_all_clients()
+        await message.answer("База очищена!", reply_markup=main_menu())
+        await start_cmd(message, state)
+        return
+    await message.answer("Нажмите кнопку!")
+
+# ------------- FSM: ДОБАВЛЕНИЕ КЛИЕНТА ----------------
+
 @dp.message(F.text == "➕ Добавить клиента")
 async def add_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -620,6 +798,8 @@ async def sub2_start(message: types.Message, state: FSMContext):
     await state.update_data(sub_2=sub, subscriptions=subs)
     await ask_games(message, state)
 
+# --- ДОБАВЛЕНИЕ: ИГРЫ, РЕЗЕРВНЫЕ КОДЫ, ФИНАЛ ---
+
 async def ask_games(message, state: FSMContext):
     await message.answer("Оформлены игры?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
@@ -723,7 +903,8 @@ async def finish_client(message: types.Message, state: FSMContext):
         await bot.delete_message(msg.chat.id, msg.message_id)
     except: pass
 
-# ------------------------ ПОИСК КЛИЕНТА -------------------------
+# --- FSM: ПОИСК КЛИЕНТА ---
+
 @dp.message(F.text == "🔍 Найти клиента")
 async def search_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -753,7 +934,8 @@ async def search_choose(message: types.Message, state: FSMContext):
         else:
             await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
 
-# ---------------------- ИНЛАЙН-КНОПКИ, РЕДАКТИРОВАНИЕ ----------------------
+# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ (ОБРАБОТКА) ---
+
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     act, field, cid = callback.data.split("_", 2)
@@ -808,6 +990,8 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("Введи список игр (каждая с новой строки):", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
         await state.set_state(AddEditClient.edit_games)
         return
+
+# --- РЕДАКТИРОВАНИЕ ПОЛЕЙ (НОМЕР, ДАТА, АККАУНТ, КОНСОЛЬ, РЕГИОН) ---
 
 @dp.message(AddEditClient.edit_input)
 async def edit_input_handler(message: types.Message, state: FSMContext):
@@ -897,6 +1081,8 @@ async def edit_reserve_handler(message: types.Message, state: FSMContext):
                 return
     await message.answer("Ошибка при обновлении.")
     await state.clear()
+
+# ------ МАСТЕР ПОДПИСКИ (редактирование подписок) ------
 
 @dp.message(AddEditClient.edit_subs_total)
 async def edit_subs_total(message: types.Message, state: FSMContext):
@@ -1124,165 +1310,16 @@ async def edit_sub_2_start(message: types.Message, state: FSMContext):
         await message.answer(format_card(clients[idx])[0], reply_markup=edit_keyboard(clients[idx]))
     return
 
-# --------------------- БАЗА / БЭКАП / СТАТИСТИКА ---------------------
-@dp.message(F.text == "📦 База")
-async def db_main_menu(message: types.Message, state: FSMContext):
+# --- СОХРАНИТЬ ИЗМЕНЕНИЯ ---
+
+@dp.callback_query(F.data.startswith("save_"))
+async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await clear_chat(message)
-    await message.answer("Меню базы", reply_markup=db_menu())
-
-@dp.message(F.text == "Выгрузка базы в чат")
-async def db_export_chat(message: types.Message, state: FSMContext):
-    clients = load_db()
-    await state.clear()
-    await clear_chat(message)
-    if not clients:
-        await message.answer("База пуста!")
-        await start_cmd(message, state)
-        return
-    for client in clients:
-        if client.get("reserve_photo_id"):
-            await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0])
-        else:
-            await message.answer(format_card(client)[0])
-    await start_cmd(message, state)
-
-@dp.message(F.text == "Выгрузка базы в файл")
-async def db_export_file(message: types.Message, state: FSMContext):
-    clients = load_db()
-    tmp_path = "/data/clients_export.json"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
-    await bot.send_document(message.chat.id, InputFile(tmp_path))
-    os.remove(tmp_path)
-    await state.clear()
-    await start_cmd(message, state)
-
-@dp.message(F.text == "🔄 Восстановить из бэкапа")
-async def db_restore(message: types.Message, state: FSMContext):
-    result = restore_from_backup()
-    if result:
-        await message.answer("Восстановлено из последнего бэкапа.")
-    else:
-        await message.answer("Нет доступных бэкапов.")
-    await start_cmd(message, state)
-
-@dp.message(F.text == "🗑 Очистить базу")
-async def db_clear_confirm(message: types.Message, state: FSMContext):
-    await message.answer("Уверены, что хотите очистить базу?\n<b>Это действие нельзя отменить!</b>", 
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Да, удалить все!"), KeyboardButton(text="Нет")]],
-            resize_keyboard=True
-        ))
-    await state.set_state(AddEditClient.awaiting_db_confirm)
-
-@dp.message(AddEditClient.awaiting_db_confirm)
-async def db_clear_action(message: types.Message, state: FSMContext):
-    if message.text == "Нет":
-        await state.clear()
-        await clear_chat(message)
-        await db_main_menu(message, state)
-        return
-    if message.text == "Да, удалить все!":
-        save_db([])
-        await message.answer("База данных полностью очищена.")
-        await state.clear()
-        await start_cmd(message, state)
-        return
-    await message.answer("Выберите действие кнопкой!")
-
-@dp.message(F.text == "📋 Статистика")
-async def db_stats(message: types.Message, state: FSMContext):
-    clients = load_db()
-    total = len(clients)
-    subs_all = [s for c in clients for s in c.get("subscriptions", []) if s.get("name") != "отсутствует"]
-    subs_types = {}
-    subs_cnt = 0
-    for s in subs_all:
-        subs_types.setdefault(s["name"], 0)
-        subs_types[s["name"]] += 1
-        subs_cnt += 1
-    two_subs = sum(1 for c in clients if len([s for s in c.get("subscriptions", []) if s.get("name") != "отсутствует"]) == 2)
-    regions = {"укр": 0, "тур": 0, "(польша)": 0, "(британия)": 0, "другой": 0}
-    for c in clients:
-        reg = c.get("region", "")
-        if reg in regions:
-            regions[reg] += 1
-        else:
-            regions["другой"] += 1
-    games_cnt = sum(len(c.get("games", [])) for c in clients)
-    week = (datetime.now() + timedelta(days=7)).date()
-    sub_ends_soon = []
-    for c in clients:
-        for sub in c.get("subscriptions", []):
-            try:
-                end = datetime.strptime(sub.get("end", ""), "%d.%m.%Y").date()
-                if datetime.now().date() <= end <= week:
-                    sub_ends_soon.append(c)
-            except: pass
-    bday_soon = []
-    for c in clients:
-        try:
-            if c.get("birth_date") and c.get("birth_date") != "отсутствует":
-                dt = datetime.strptime(c["birth_date"], "%d.%m.%Y")
-                now = datetime.now()
-                next_bd = dt.replace(year=now.year)
-                if 0 <= (next_bd - now).days <= 7:
-                    bday_soon.append(c)
-        except: pass
-    txt = "<b>Статистика CRM</b>\n\n"
-    txt += f"👤 Клиентов: {total}\n"
-    txt += f"💳 С подписками: {len([c for c in clients if any(s.get('name') != 'отсутствует' for s in c.get('subscriptions', []))])}\n"
-    for k in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play"):
-        txt += f"— {k}: {subs_types.get(k, 0)}\n"
-    txt += f"🔁 Две подписки: {two_subs}\n\n"
-    txt += "🌍 Регионы: "
-    txt += " | ".join([f"{k}: {v}" for k, v in regions.items()])
-    txt += f"\n\n🎮 Оформлено игр: {games_cnt}\n"
-    txt += f"⏳ Подписки истекают (7 дней): {len(sub_ends_soon)}\n"
-    txt += f"🎂 День рождения скоро: {len(bday_soon)}\n"
-    await message.answer(txt, reply_markup=db_menu())
-
-# ------------- АВТОБЭКАПЫ/НАПОМИНАНИЯ: ДНИ РОЖДЕНИЯ, ПОДПИСКИ ----------------
-async def notify_subs():
-    clients = load_db()
-    tomorrow = (datetime.now() + timedelta(days=1)).date()
-    for c in clients:
-        for sub in c.get("subscriptions", []):
-            try:
-                end = datetime.strptime(sub.get("end", ""), "%d.%m.%Y").date()
-                if end == tomorrow:
-                    card, photo = format_card(c)
-                    if c.get("reserve_photo_id"):
-                        await bot.send_photo(ADMIN_ID, c["reserve_photo_id"], caption=f"⚠️ Завтра заканчивается подписка:\n\n{card}", reply_markup=edit_keyboard(c))
-                    else:
-                        await bot.send_message(ADMIN_ID, f"⚠️ Завтра заканчивается подписка:\n\n{card}", reply_markup=edit_keyboard(c))
-            except: pass
-
-async def notify_birthdays():
-    clients = load_db()
-    now = datetime.now()
-    for c in clients:
-        try:
-            if c.get("birth_date") and c.get("birth_date") != "отсутствует":
-                dt = datetime.strptime(c["birth_date"], "%d.%m.%Y")
-                next_bd = dt.replace(year=now.year)
-                if next_bd.date() == now.date():
-                    card, photo = format_card(c)
-                    if c.get("reserve_photo_id"):
-                        await bot.send_photo(ADMIN_ID, c["reserve_photo_id"], caption=f"🎂 Сегодня день рождения:\n\n{card}", reply_markup=edit_keyboard(c))
-                    else:
-                        await bot.send_message(ADMIN_ID, f"🎂 Сегодня день рождения:\n\n{card}", reply_markup=edit_keyboard(c))
-        except: pass
-
-def schedule_all():
-    scheduler.add_job(auto_backup, "interval", hours=12)
-    scheduler.add_job(lambda: asyncio.create_task(notify_subs()), "cron", hour=9, minute=0)
-    scheduler.add_job(lambda: asyncio.create_task(notify_birthdays()), "cron", hour=9, minute=0)
+    await clear_chat(callback.message)
+    await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
 
 # --- ЗАПУСК ---
 async def main():
-    schedule_all()
     scheduler.start()
     await dp.start_polling(bot)
 
