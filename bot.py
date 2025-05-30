@@ -1,6 +1,9 @@
 import asyncio
 import os
 import json
+
+os.makedirs("/data", exist_ok=True)  # Создаёт папку для Railway volume
+
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
@@ -15,8 +18,8 @@ from aiogram.fsm.state import StatesGroup, State
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from cryptography.fernet import Fernet
 
-DB_FILE = "/data/clients_db.json"  # Здесь путь на volume!
-KEY_FILE = "/data/secret.key"      # Ключ тоже храним на volume!
+DB_FILE = "/data/clients_db.json"
+KEY_FILE = "/data/secret.key"
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
 
@@ -162,16 +165,16 @@ def console_btns():
 def edit_keyboard(client):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📱 Изменить номер-TG", callback_data=f"edit_contact_{client['id']}"),
-            InlineKeyboardButton(text="🔐 Изменить данные", callback_data=f"edit_account_{client['id']}"),
-            InlineKeyboardButton(text="💳 Изменить подписку", callback_data=f"edit_sub_{client['id']}"),
-            InlineKeyboardButton(text="🎲 Изменить игры", callback_data=f"edit_games_{client['id']}"),
+            InlineKeyboardButton(text="📱 Изм. номер", callback_data=f"edit_contact_{client['id']}"),
+            InlineKeyboardButton(text="🔐 Изм. данные", callback_data=f"edit_account_{client['id']}"),
+            InlineKeyboardButton(text="💳 Изм. подписку", callback_data=f"edit_sub_{client['id']}"),
+            InlineKeyboardButton(text="🎲 Изм. игры", callback_data=f"edit_games_{client['id']}"),
         ],
         [
-            InlineKeyboardButton(text="🖼 Изменить резерв-коды", callback_data=f"edit_reserve_{client['id']}"),
-            InlineKeyboardButton(text="🎮 Изменить консоль", callback_data=f"edit_console_{client['id']}"),
-            InlineKeyboardButton(text="📅 Изменить дату рождения", callback_data=f"edit_birth_{client['id']}"),
-            InlineKeyboardButton(text="🌍 Изменить регион", callback_data=f"edit_region_{client['id']}"),
+            InlineKeyboardButton(text="🖼 Изм. резерв", callback_data=f"edit_reserve_{client['id']}"),
+            InlineKeyboardButton(text="🎮 Изм. консоль", callback_data=f"edit_console_{client['id']}"),
+            InlineKeyboardButton(text="📅 Изм. дату", callback_data=f"edit_birth_{client['id']}"),
+            InlineKeyboardButton(text="🌍 Изм. регион", callback_data=f"edit_region_{client['id']}"),
         ],
         [
             InlineKeyboardButton(text="✅ Сохранить", callback_data=f"save_{client['id']}")
@@ -249,9 +252,7 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await clear_chat(message)
     await message.answer("Главное меню", reply_markup=main_menu())
 
-
 # --- ДОБАВЛЕНИЕ КЛИЕНТА ---
-
 @dp.message(F.text == "➕ Добавить клиента")
 async def add_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -698,13 +699,12 @@ async def finish_client(message: types.Message, state: FSMContext):
         await bot.delete_message(msg.chat.id, msg.message_id)
     except: pass
 
-# --- ПОИСК КЛИЕНТА (универсальный по любой информации) ---
-
+# --- ПОИСК КЛИЕНТА ---
 @dp.message(F.text == "🔍 Найти клиента")
 async def search_start(message: types.Message, state: FSMContext):
     await state.clear()
     await clear_chat(message)
-    await message.answer("Введите запрос для поиска по всей базе (можно логин, игру, что угодно):",
+    await message.answer("Введите запрос для поиска (номер, логин, игра и т.д.):",
         reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.edit_choose)
 
@@ -716,21 +716,20 @@ async def search_choose(message: types.Message, state: FSMContext):
         await start_cmd(message, state)
         return
     query = message.text.strip()
-    results = find_clients_by_any(query)
-    if not results:
-        await message.answer("Клиент не найден.")
+    clients = find_clients(query)
+    if not clients:
+        await message.answer("Клиентов не найдено.")
         await start_cmd(message, state)
         return
     await state.clear()
     await clear_chat(message)
-    for client in results:
+    for client in clients:
         if client.get("reserve_photo_id"):
             await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0], reply_markup=edit_keyboard(client))
         else:
             await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
 
 # --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ ---
-
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     act, field, cid = callback.data.split("_", 2)
@@ -786,8 +785,7 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(AddEditClient.edit_games)
         return
 
-# --- РЕДАКТИРОВАНИЕ ПОЛЕЙ ---
-
+# --- РЕДАКТИРОВАНИЕ ПОЛЕЙ (контакт, дата рождения, логин/пароль, консоль, регион) ---
 @dp.message(AddEditClient.edit_input)
 async def edit_input_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
@@ -877,8 +875,7 @@ async def edit_reserve_handler(message: types.Message, state: FSMContext):
     await message.answer("Ошибка при обновлении.")
     await state.clear()
 
-# --- МАСТЕР РЕДАКТИРОВАНИЯ ПОДПИСКИ (ИЗОЛИРОВАНО) ---
-
+# --- МАСТЕР РЕДАКТИРОВАНИЯ ПОДПИСОК (аналогично добавлению) ---
 @dp.message(AddEditClient.edit_subs_total)
 async def edit_subs_total(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
@@ -1105,8 +1102,7 @@ async def edit_sub_2_start(message: types.Message, state: FSMContext):
         await message.answer(format_card(clients[idx])[0], reply_markup=edit_keyboard(clients[idx]))
     return
 
-# --- СОХРАНИТЬ ---
-
+# --- СОХРАНИТЬ (после редактирования) ---
 @dp.callback_query(F.data.startswith("save_"))
 async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -1114,40 +1110,51 @@ async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
 
 # --- ВЫГРУЗКА БАЗЫ ---
-
-@dp.message(F.text == "Выгрузить базу")
-async def dump_menu(message: types.Message):
+@dp.message(F.text.in_({"Выгрузить базу", "выгрузить базу", "dump"}))
+async def dump_db(message: types.Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Выгрузить в диалог"), KeyboardButton(text="Выгрузить файлом")],
             [KeyboardButton(text="❌ Отмена")]
-        ], resize_keyboard=True
-    )
-    await message.answer("Выберите способ выгрузки базы:", reply_markup=kb)
+        ], resize_keyboard=True)
+    await message.answer("Выбери способ выгрузки:", reply_markup=kb)
+    await state.set_state(AddEditClient.awaiting_confirm)
 
-@dp.message(F.text == "Выгрузить в диалог")
-async def dump_dialog(message: types.Message):
-    clients = load_db()
-    if not clients:
-        await message.answer("База пуста.")
+@dp.message(AddEditClient.awaiting_confirm)
+async def dump_choose(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await clear_chat(message)
+        await start_cmd(message, state)
         return
-    for client in clients:
-        if client.get("reserve_photo_id"):
-            await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0], reply_markup=edit_keyboard(client))
-        else:
-            await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
+    if message.text == "Выгрузить в диалог":
+        clients = load_db()
+        await state.clear()
+        await clear_chat(message)
+        if not clients:
+            await message.answer("База пуста!")
+            await start_cmd(message, state)
+            return
+        for client in clients:
+            if client.get("reserve_photo_id"):
+                await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0])
+            else:
+                await message.answer(format_card(client)[0])
+        await start_cmd(message, state)
+        return
+    if message.text == "Выгрузить файлом":
+        clients = load_db()
+        tmp_path = "clients_export.json"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(clients, f, ensure_ascii=False, indent=2)
+        await bot.send_document(message.chat.id, InputFile(tmp_path))
+        os.remove(tmp_path)
+        await state.clear()
+        await start_cmd(message, state)
+        return
+    await message.answer("Нажми кнопку!")
 
-@dp.message(F.text == "Выгрузить файлом")
-async def dump_file(message: types.Message):
-    clients = load_db()
-    filename = "clients_dump.json"
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
-    await bot.send_document(message.chat.id, InputFile(filename))
-    os.remove(filename)
-
-# --- ФИНАЛ ---
-
+# --- ЗАПУСК ---
 async def main():
     scheduler.start()
     await dp.start_polling(bot)
