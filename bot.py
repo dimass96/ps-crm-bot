@@ -1,8 +1,6 @@
 import asyncio
 import os
 import json
-import shutil
-import glob
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
@@ -10,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+    InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -56,9 +54,6 @@ def load_db():
             return []
 
 def save_db(data):
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
-            backup.write(orig.read())
     encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
     with open(DB_FILE, "wb") as f:
         f.write(encrypted)
@@ -139,154 +134,6 @@ class AddEditClient(StatesGroup):
     edit_sub_2_type = State()
     edit_sub_2_duration = State()
     edit_sub_2_start = State()
-    awaiting_backup_choice = State()
-    # Для очистки и восстановления
-    awaiting_confirm_clear = State()
-    awaiting_confirm_restore = State()import asyncio
-import os
-import json
-import shutil
-import glob
-from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import CommandStart
-from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton, InputFile
-)
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from cryptography.fernet import Fernet
-
-DB_FILE = "clients_db.json"
-KEY_FILE = "secret.key"
-API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
-ADMIN_ID = 350902460
-
-def generate_key():
-    if not os.path.exists(KEY_FILE):
-        os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True) if os.path.dirname(KEY_FILE) else None
-        key = Fernet.generate_key()
-        with open(KEY_FILE, "wb") as f:
-            f.write(key)
-
-def load_key():
-    with open(KEY_FILE, "rb") as f:
-        return f.read()
-
-def encrypt_data(data: str, key: bytes) -> bytes:
-    return Fernet(key).encrypt(data.encode())
-
-def decrypt_data(token: bytes, key: bytes) -> str:
-    return Fernet(key).decrypt(token).decode()
-
-generate_key()
-ENCRYPT_KEY = load_key()
-
-def load_db():
-    if not os.path.exists(DB_FILE):
-        return []
-    with open(DB_FILE, "rb") as f:
-        try:
-            encrypted = f.read()
-            if not encrypted:
-                return []
-            decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
-            return json.loads(decrypted)
-        except Exception:
-            return []
-
-def save_db(data):
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
-            backup.write(orig.read())
-    encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
-    with open(DB_FILE, "wb") as f:
-        f.write(encrypted)
-
-def get_next_client_id(clients):
-    if not clients: return 1
-    return max(c["id"] for c in clients) + 1
-
-def find_clients(query):
-    clients = load_db()
-    results = []
-    q = query.lower()
-    for c in clients:
-        if (q in str(c.get("contact", "")).lower() or
-            q in str(c.get("birth_date", "")).lower() or
-            q in str(c.get("region", "")).lower() or
-            q in str(c.get("console", "")).lower() or
-            any(q in str(val).lower() for val in c.get("games", [])) or
-            q in str(c.get("account", {}).get("login", "")).lower() or
-            q in str(c.get("account", {}).get("password", "")).lower() or
-            q in str(c.get("account", {}).get("mail_pass", "")).lower() or
-            any(q in str(sub.get("name", "")).lower() or q in str(sub.get("duration", "")).lower() for sub in c.get("subscriptions", []))
-        ):
-            results.append(c)
-    return results
-
-def save_new_client(client):
-    clients = load_db()
-    clients.append(client)
-    save_db(clients)
-
-def update_client(client):
-    clients = load_db()
-    for i, c in enumerate(clients):
-        if c["id"] == client["id"]:
-            clients[i] = client
-            save_db(clients)
-            return
-    clients.append(client)
-    save_db(clients)
-
-def delete_client(client_id):
-    clients = load_db()
-    clients = [c for c in clients if c["id"] != client_id]
-    save_db(clients)
-
-class AddEditClient(StatesGroup):
-    contact = State()
-    birthdate_yesno = State()
-    birthdate = State()
-    account = State()
-    region = State()
-    console = State()
-    subscriptions_yesno = State()
-    subscriptions_count = State()
-    sub_1_type = State()
-    sub_1_duration = State()
-    sub_1_start = State()
-    sub_2_type = State()
-    sub_2_duration = State()
-    sub_2_start = State()
-    games_yesno = State()
-    games_input = State()
-    reserve_yesno = State()
-    reserve_photo = State()
-    final_card = State()
-    edit_choose = State()
-    edit_input = State()
-    edit_games = State()
-    edit_subs = State()
-    edit_reserve = State()
-    awaiting_confirm = State()
-    edit_subs_master = State()
-    edit_subs_total = State()
-    edit_sub_1_type = State()
-    edit_sub_1_duration = State()
-    edit_sub_1_start = State()
-    edit_sub_2_type = State()
-    edit_sub_2_duration = State()
-    edit_sub_2_start = State()
-    awaiting_backup_choice = State()
-    # Для очистки и восстановления
-    awaiting_confirm_clear = State()
-    awaiting_confirm_restore = State()
 
 def region_btns():
     return ReplyKeyboardMarkup(
@@ -337,19 +184,6 @@ def main_menu():
         keyboard=[
             [KeyboardButton(text="➕ Добавить клиента")],
             [KeyboardButton(text="🔍 Найти клиента")],
-            [KeyboardButton(text="📦 База")],
-            [KeyboardButton(text="📊 Статистика")]
-        ], resize_keyboard=True
-    )
-
-def base_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Выгрузить всю базу в чат"), KeyboardButton(text="Выгрузить всю базу в файл")],
-            [KeyboardButton(text="Заканчивается подписка (7д)"), KeyboardButton(text="Скоро ДР (7д)")],
-            [KeyboardButton(text="Без подписки"), KeyboardButton(text="Сделать бэкап базы")],
-            [KeyboardButton(text="Восстановить из бэкапа"), KeyboardButton(text="Очистить базу")],
-            [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True
     )
 
@@ -389,9 +223,9 @@ def format_card(client, show_photo_id=False):
 async def clear_chat(message: types.Message):
     try:
         chat = message.chat.id
-        async for msg in bot.get_chat_history(chat, limit=100):
+        async for msg in Bot.get_current().get_chat_history(chat, limit=100):
             try:
-                await bot.delete_message(chat, msg.message_id)
+                await Bot.get_current().delete_message(chat, msg.message_id)
             except:
                 continue
     except:
@@ -413,7 +247,6 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await clear_chat(message)
     await message.answer("Главное меню", reply_markup=main_menu())
 
-# --- ДОБАВЛЕНИЕ КЛИЕНТА ---
 @dp.message(F.text == "➕ Добавить клиента")
 async def add_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -755,8 +588,6 @@ async def sub2_start(message: types.Message, state: FSMContext):
     await state.update_data(sub_2=sub, subscriptions=subs)
     await ask_games(message, state)
 
-# --- ДОБАВЛЕНИЕ: ИГРЫ, РЕЗЕРВНЫЕ КОДЫ, ФИНАЛ ---
-
 async def ask_games(message, state: FSMContext):
     await message.answer("Оформлены игры?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
@@ -857,7 +688,6 @@ async def finish_client(message, state: FSMContext):
     else:
         await message.answer(text, reply_markup=edit_keyboard(client))
 
-# --- ПОИСК КЛИЕНТА ---
 @dp.message(F.text == "🔍 Найти клиента")
 async def find_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -875,7 +705,6 @@ async def do_find(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    # Если ожидается редактирование, а не поиск
     data = await state.get_data()
     if data.get("edit_id") and data.get("edit_field"):
         cid = data.get("edit_id")
@@ -910,7 +739,6 @@ async def do_find(message: types.Message, state: FSMContext):
         await message.answer("Ошибка при обновлении.")
         await state.clear()
         return
-    # Обычный поиск
     results = find_clients(message.text.strip())
     if not results:
         await message.answer("Клиентов не найдено.")
@@ -922,8 +750,6 @@ async def do_find(message: types.Message, state: FSMContext):
             await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(client))
         else:
             await message.answer(text, reply_markup=edit_keyboard(client))
-
-# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ ---
 
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
@@ -1054,8 +880,6 @@ async def edit_reserve_handler(message: types.Message, state: FSMContext):
             return
     await message.answer("Ошибка при обновлении.")
     await state.clear()
-
-# --- МАСТЕР РЕДАКТИРОВАНИЯ ПОДПИСКИ ---
 
 @dp.message(AddEditClient.edit_subs_total)
 async def edit_subs_total(message: types.Message, state: FSMContext):
@@ -1288,15 +1112,11 @@ async def edit_sub_2_start(message: types.Message, state: FSMContext):
         await message.answer(text, reply_markup=edit_keyboard(clients[idx]))
     return
 
-# --- СОХРАНИТЬ ИЗМЕНЕНИЯ ---
-
 @dp.callback_query(F.data.startswith("save_"))
 async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await clear_chat(callback.message)
     await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
-
-# --- ГЛАВНОЕ МЕНЮ, ЗАПУСК ---
 
 @dp.message(F.text == "❌ Отмена")
 async def cancel_any(message: types.Message, state: FSMContext):
