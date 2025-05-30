@@ -17,14 +17,17 @@ from aiogram.fsm.state import StatesGroup, State
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from cryptography.fernet import Fernet
 
-DB_FILE = "clients_db.json"
-KEY_FILE = "secret.key"
+DB_DIR = "/data"
+os.makedirs(DB_DIR, exist_ok=True)
+
+DB_FILE = os.path.join(DB_DIR, "clients_db.json")
+KEY_FILE = os.path.join(DB_DIR, "secret.key")
+
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
 
 def generate_key():
     if not os.path.exists(KEY_FILE):
-        os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True) if os.path.dirname(KEY_FILE) else None
         key = Fernet.generate_key()
         with open(KEY_FILE, "wb") as f:
             f.write(key)
@@ -730,8 +733,8 @@ async def do_find(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
+    # Если ожидается редактирование, а не поиск
     data = await state.get_data()
-    # Если редактирование
     if data.get("edit_id") and data.get("edit_field"):
         cid = data.get("edit_id")
         field = data.get("edit_field")
@@ -1151,164 +1154,173 @@ async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await clear_chat(callback.message)
     await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
 
-# --- БАЗА: Выгрузка и управление ---
+# --- БАЗА И СТАТИСТИКА ---
 
 @dp.message(F.text == "📦 База")
-async def base_menu_handler(message: types.Message, state: FSMContext):
+async def base_menu_handler(message: types.Message):
     await clear_chat(message)
     await message.answer("Меню базы данных:", reply_markup=base_menu())
 
 @dp.message(F.text == "Выгрузить всю базу в чат")
-async def export_db_chat(message: types.Message):
+async def dump_db_chat(message: types.Message):
     clients = load_db()
     if not clients:
-        await message.answer("База пустая.")
+        await message.answer("База пуста.")
         return
-    for c in clients:
-        text, photo_id = format_card(c, show_photo_id=True)
+    for client in clients:
+        text, photo_id = format_card(client, show_photo_id=True)
         if photo_id:
             await message.answer_photo(photo_id, caption=text)
         else:
             await message.answer(text)
 
 @dp.message(F.text == "Выгрузить всю базу в файл")
-async def export_db_file(message: types.Message):
+async def dump_db_file(message: types.Message):
     clients = load_db()
     if not clients:
-        await message.answer("База пустая.")
+        await message.answer("База пуста.")
         return
-    temp_filename = "clients_export.txt"
-    with open(temp_filename, "w", encoding="utf-8") as f:
-        for c in clients:
-            text, _ = format_card(c)
-            f.write(text + "\n\n")
-    await message.answer_document(InputFile(temp_filename))
-    os.remove(temp_filename)
+    lines = []
+    for client in clients:
+        lines.append(f"{client.get('contact', '')}; {client.get('birth_date', '')}; {client.get('region', '')}; {client.get('console', '')}")
+    filename = os.path.join(DB_DIR, "clients_dump.txt")
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    await message.answer_document(InputFile(filename))
 
 @dp.message(F.text == "Очистить базу")
-async def clear_db_start(message: types.Message, state: FSMContext):
-    await message.answer("Вы уверены? Это удалит всю базу навсегда.\nНапишите 'ДА' для подтверждения или '❌ Отмена' для отмены.")
+async def clear_db_confirm(message: types.Message, state: FSMContext):
+    await message.answer("Вы уверены? Напишите 'ДА' для подтверждения очистки базы.")
     await state.set_state(AddEditClient.awaiting_confirm_clear)
 
 @dp.message(AddEditClient.awaiting_confirm_clear)
-async def clear_db_confirm(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await state.clear()
-        await start_cmd(message, state)
-        return
+async def clear_db_action(message: types.Message, state: FSMContext):
     if message.text.upper() == "ДА":
         if os.path.exists(DB_FILE):
             os.remove(DB_FILE)
         await message.answer("База очищена.")
-        await state.clear()
-        await start_cmd(message, state)
     else:
-        await message.answer("Отмена. Главное меню.")
-        await state.clear()
-        await start_cmd(message, state)
-
-@dp.message(F.text == "Сделать бэкап базы")
-async def backup_db(message: types.Message):
-    if not os.path.exists(DB_FILE):
-        await message.answer("База пуста, бэкап невозможен.")
-        return
-    backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
-    shutil.copy(DB_FILE, backup_name)
-    await message.answer(f"Бэкап создан: {backup_name}")
-
-@dp.message(F.text == "Восстановить из бэкапа")
-async def restore_db_start(message: types.Message, state: FSMContext):
-    backups = glob.glob("backup_*.bak")
-    if not backups:
-        await message.answer("Бэкапы не найдены.")
-        return
-    buttons = [[KeyboardButton(text=b)] for b in backups]
-    buttons.append([KeyboardButton(text="❌ Отмена")])
-    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-    await message.answer("Выберите бэкап для восстановления:", reply_markup=kb)
-    await state.set_state(AddEditClient.awaiting_backup_choice)
-
-@dp.message(AddEditClient.awaiting_backup_choice)
-async def restore_db_confirm(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await state.clear()
-        await start_cmd(message, state)
-        return
-    backup_file = message.text.strip()
-    if not os.path.exists(backup_file):
-        await message.answer("Файл не найден, попробуйте ещё раз.")
-        return
-    shutil.copy(backup_file, DB_FILE)
-    await message.answer(f"База восстановлена из {backup_file}.")
+        await message.answer("Очистка базы отменена.")
     await state.clear()
     await start_cmd(message, state)
 
-# --- СТАТИСТИКА ---
+@dp.message(F.text == "Сделать бэкап базы")
+async def backup_db(message: types.Message):
+    if os.path.exists(DB_FILE):
+        backup_path = os.path.join(DB_DIR, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak")
+        shutil.copy2(DB_FILE, backup_path)
+        await message.answer("Бэкап создан.")
+    else:
+        await message.answer("База пуста, бэкап не создан.")
 
-@dp.message(F.text == "📊 Статистика")
-async def stats_handler(message: types.Message):
+@dp.message(F.text == "Восстановить из бэкапа")
+async def restore_backup_prompt(message: types.Message, state: FSMContext):
+    await message.answer("Напишите путь к бэкапу для восстановления.")
+    await state.set_state(AddEditClient.awaiting_confirm_restore)
+
+@dp.message(AddEditClient.awaiting_confirm_restore)
+async def restore_backup_action(message: types.Message, state: FSMContext):
+    path = message.text.strip()
+    if not os.path.exists(path):
+        await message.answer("Файл не найден.")
+        await state.clear()
+        return
+    shutil.copy2(path, DB_FILE)
+    await message.answer("База восстановлена из бэкапа.")
+    await state.clear()
+    await start_cmd(message, state)
+
+@dp.message(F.text == "Заканчивается подписка (7д)")
+async def expiring_subs(message: types.Message):
     clients = load_db()
-    total = len(clients)
-    subs_count = 0
-    games_count = 0
-    subs_expiring = 0
-    birthdays_soon = 0
-    no_subs = 0
-    regions = {}
-    now = datetime.now()
+    today = datetime.today()
+    threshold = today + timedelta(days=7)
+    results = []
     for c in clients:
         subs = c.get("subscriptions", [])
-        if subs and subs[0].get("name") != "отсутствует":
-            subs_count += 1
-            for sub in subs:
-                try:
-                    end_date = datetime.strptime(sub.get("end", "01.01.1970"), "%d.%m.%Y")
-                    if 0 <= (end_date - now).days <= 7:
-                        subs_expiring += 1
-                except:
-                    pass
-        else:
-            no_subs += 1
-        if c.get("games"):
-            games_count += len(c.get("games", []))
-        bdate_str = c.get("birth_date", "отсутствует")
-        if bdate_str != "отсутствует":
+        for sub in subs:
+            if sub.get("name") == "отсутствует":
+                continue
             try:
-                bdate = datetime.strptime(bdate_str, "%d.%m.%Y")
-                next_birthday = bdate.replace(year=now.year)
-                if next_birthday < now:
-                    next_birthday = next_birthday.replace(year=now.year + 1)
-                days_to_bday = (next_birthday - now).days
-                if 0 <= days_to_bday <= 7:
-                    birthdays_soon += 1
+                end_date = datetime.strptime(sub.get("end", ""), "%d.%m.%Y")
+                if today <= end_date <= threshold:
+                    results.append(c)
+                    break
             except:
-                pass
-        reg = c.get("region", "—")
-        regions[reg] = regions.get(reg, 0) + 1
+                continue
+    if not results:
+        await message.answer("Нет подписок, заканчивающихся в ближайшие 7 дней.")
+        return
+    for client in results:
+        text, photo_id = format_card(client, show_photo_id=True)
+        if photo_id:
+            await message.answer_photo(photo_id, caption=text)
+        else:
+            await message.answer(text)
 
-    text = (
-        f"📊 <b>Статистика базы:</b>\n"
-        f"Всего клиентов: <b>{total}</b>\n"
-        f"С подписками: <b>{subs_count}</b>\n"
-        f"Без подписок: <b>{no_subs}</b>\n"
-        f"Подписки заканчиваются за 7 дней: <b>{subs_expiring}</b>\n"
-        f"Игры оформлено: <b>{games_count}</b>\n"
-        f"Дней рождения скоро (7 дней): <b>{birthdays_soon}</b>\n"
-        f"\n🌍 <b>Регионы:</b>"
-    )
-    for reg, count in regions.items():
-        text += f"\n- {reg}: {count}"
+@dp.message(F.text == "Скоро ДР (7д)")
+async def upcoming_birthday(message: types.Message):
+    clients = load_db()
+    today = datetime.today()
+    threshold = today + timedelta(days=7)
+    results = []
+    for c in clients:
+        bd = c.get("birth_date", "")
+        if bd == "отсутствует" or not bd:
+            continue
+        try:
+            bd_date = datetime.strptime(bd, "%d.%m.%Y")
+            bd_this_year = bd_date.replace(year=today.year)
+            if today <= bd_this_year <= threshold:
+                results.append(c)
+        except:
+            continue
+    if not results:
+        await message.answer("Нет клиентов с ДР в ближайшие 7 дней.")
+        return
+    for client in results:
+        text, photo_id = format_card(client, show_photo_id=True)
+        if photo_id:
+            await message.answer_photo(photo_id, caption=text)
+        else:
+            await message.answer(text)
+
+@dp.message(F.text == "Без подписки")
+async def no_subscription_clients(message: types.Message):
+    clients = load_db()
+    results = [c for c in clients if not c.get("subscriptions") or (c.get("subscriptions")[0].get("name") == "отсутствует")]
+    if not results:
+        await message.answer("Нет клиентов без подписки.")
+        return
+    for client in results:
+        text, photo_id = format_card(client, show_photo_id=True)
+        if photo_id:
+            await message.answer_photo(photo_id, caption=text)
+        else:
+            await message.answer(text)
+
+@dp.message(F.text == "📊 Статистика")
+async def statistics(message: types.Message):
+    clients = load_db()
+    total = len(clients)
+    with_sub = sum(1 for c in clients if c.get("subscriptions") and c.get("subscriptions")[0].get("name") != "отсутствует")
+    without_sub = total - with_sub
+    regions = {}
+    for c in clients:
+        r = c.get("region", "—")
+        regions[r] = regions.get(r, 0) + 1
+    text = f"📊 <b>Статистика базы</b>:\n\nВсего клиентов: {total}\nС подпиской: {with_sub}\nБез подписки: {without_sub}\n\nПо регионам:"
+    for r, cnt in regions.items():
+        text += f"\n- {r}: {cnt}"
     await message.answer(text)
 
-# --- ОЧИСТКА ЧАТА ---
+# --- ГЛАВНОЕ МЕНЮ, ЗАПУСК ---
 
 @dp.message(F.text == "❌ Отмена")
 async def cancel_any(message: types.Message, state: FSMContext):
     await state.clear()
     await clear_chat(message)
     await message.answer("Главное меню", reply_markup=main_menu())
-
-# --- ЗАПУСК БОТА ---
 
 async def main():
     scheduler.start()
