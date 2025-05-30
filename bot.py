@@ -17,13 +17,14 @@ from cryptography.fernet import Fernet
 
 DB_FILE = "/data/clients_db.json"
 KEY_FILE = "/data/secret.key"
-BACKUP_DIR = "/data"
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
 
-# --- ШИФРОВАНИЕ БД И БЭКАП ---
+def ensure_data_dir():
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+
 def generate_key():
-    os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
+    ensure_data_dir()
     if not os.path.exists(KEY_FILE):
         key = Fernet.generate_key()
         with open(KEY_FILE, "wb") as f:
@@ -39,10 +40,34 @@ def encrypt_data(data: str, key: bytes) -> bytes:
 def decrypt_data(token: bytes, key: bytes) -> str:
     return Fernet(key).decrypt(token).decode()
 
+def backup_db():
+    ensure_data_dir()
+    filename = f"/data/clients_db_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "rb") as orig, open(filename, "wb") as backup:
+            backup.write(orig.read())
+    return filename
+
+def restore_last_backup():
+    backups = ["/data/"+f for f in os.listdir("/data") if f.startswith("clients_db_backup") and f.endswith(".json")]
+    if not backups:
+        return False
+    backups.sort(reverse=True)
+    backup_file = backups[0]
+    with open(backup_file, "rb") as f:
+        encrypted = f.read()
+    with open(KEY_FILE, "rb") as kf:
+        key = kf.read()
+    decrypted = decrypt_data(encrypted, key)
+    with open(DB_FILE, "wb") as dbf:
+        dbf.write(encrypt_data(decrypted, key))
+    return True
+
 generate_key()
 ENCRYPT_KEY = load_key()
 
 def load_db():
+    ensure_data_dir()
     if not os.path.exists(DB_FILE):
         return []
     with open(DB_FILE, "rb") as f:
@@ -56,39 +81,13 @@ def load_db():
             return []
 
 def save_db(data):
-    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+    ensure_data_dir()
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
+        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_lastbackup", "wb") as backup:
             backup.write(orig.read())
     encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
     with open(DB_FILE, "wb") as f:
         f.write(encrypted)
-
-def backup_db():
-    clients = load_db()
-    if not clients:
-        return
-    fname = f"clients_db_{datetime.now().strftime('%Y%m%d')}.json"
-    path = os.path.join(BACKUP_DIR, fname)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
-    return path
-
-def get_last_backup():
-    files = [f for f in os.listdir(BACKUP_DIR) if f.startswith("clients_db_") and f.endswith(".json")]
-    if not files:
-        return None
-    files.sort(reverse=True)
-    return os.path.join(BACKUP_DIR, files[0])
-
-def restore_last_backup():
-    path = get_last_backup()
-    if not path:
-        return False
-    with open(path, "r", encoding="utf-8") as f:
-        clients = json.load(f)
-    save_db(clients)
-    return True
 
 def get_next_client_id(clients):
     if not clients: return 1
@@ -167,9 +166,43 @@ class AddEditClient(StatesGroup):
     edit_sub_2_type = State()
     edit_sub_2_duration = State()
     edit_sub_2_start = State()
-    menu_base = State()
+    awaiting_db_action = State()
 
-# --- BUTTONS & UI ---
+def main_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➕ Добавить клиента")],
+            [KeyboardButton(text="🔍 Найти клиента")],
+            [KeyboardButton(text="📂 База")],
+            [KeyboardButton(text="📊 Статистика")]
+        ], resize_keyboard=True
+    )
+
+def base_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Выгрузить в чат"), KeyboardButton(text="Выгрузить файлом")],
+            [KeyboardButton(text="Создать бэкап"), KeyboardButton(text="Восстановить бэкап")],
+            [KeyboardButton(text="Очистить базу")],
+            [KeyboardButton(text="❌ Отмена")]
+        ], resize_keyboard=True
+    )
+
+def stat_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📊 Обновить статистику")],
+            [KeyboardButton(text="🔙 Назад")]
+        ], resize_keyboard=True
+    )
+
+def confirm_clear_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Да"), KeyboardButton(text="Нет")]
+        ], resize_keyboard=True
+    )
+
 def region_btns():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -212,25 +245,6 @@ def edit_keyboard(client):
         ]
     ])
 
-def main_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Добавить клиента")],
-            [KeyboardButton(text="🔍 Найти клиента")],
-            [KeyboardButton(text="📂 База")],
-            [KeyboardButton(text="📊 Статистика")],
-        ], resize_keyboard=True
-    )
-
-def base_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Выгрузка базы в чат"), KeyboardButton(text="Выгрузка базы в файл")],
-            [KeyboardButton(text="📦 Бэкап"), KeyboardButton(text="♻️ Восстановить из бэкапа")],
-            [KeyboardButton(text="❌ Отмена")]
-        ], resize_keyboard=True
-    )
-
 def format_card(client, show_photo_id=False):
     lines = []
     contact = client.get("contact", "—")
@@ -264,13 +278,12 @@ def format_card(client, show_photo_id=False):
     reserve_photo_id = client.get("reserve_photo_id")
     return "\n".join(lines), reserve_photo_id if show_photo_id else None
 
-# --- ЧИСТКА ЧАТА ---
 async def clear_chat(message: types.Message):
     try:
         chat = message.chat.id
-        async for msg in bot.get_chat_history(chat, limit=100):
+        async for msg in message.bot.get_chat_history(chat, limit=100):
             try:
-                await bot.delete_message(chat, msg.message_id)
+                await message.bot.delete_message(chat, msg.message_id)
             except:
                 continue
     except:
@@ -293,100 +306,7 @@ async def start_cmd(message: types.Message, state: FSMContext):
     await clear_chat(message)
     await message.answer("Главное меню", reply_markup=main_menu())
 
-# --- МЕНЮ БАЗЫ ---
-@dp.message(F.text == "📂 База")
-async def menu_base(message: types.Message, state: FSMContext):
-    await state.clear()
-    await clear_chat(message)
-    await message.answer("Меню базы:", reply_markup=base_menu())
-    await state.set_state(AddEditClient.menu_base)
-
-@dp.message(AddEditClient.menu_base)
-async def base_action(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await state.clear()
-        await clear_chat(message)
-        await start_cmd(message, state)
-        return
-    if message.text == "Выгрузка базы в чат":
-        clients = load_db()
-        await state.clear()
-        await clear_chat(message)
-        if not clients:
-            await message.answer("База пуста!")
-            await start_cmd(message, state)
-            return
-        for client in clients:
-            if client.get("reserve_photo_id"):
-                await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0])
-            else:
-                await message.answer(format_card(client)[0])
-        await start_cmd(message, state)
-        return
-    if message.text == "Выгрузка базы в файл":
-        clients = load_db()
-        tmp_path = os.path.join(BACKUP_DIR, "clients_export.json")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(clients, f, ensure_ascii=False, indent=2)
-        await bot.send_document(message.chat.id, InputFile(tmp_path))
-        os.remove(tmp_path)
-        await state.clear()
-        await start_cmd(message, state)
-        return
-    if message.text == "📦 Бэкап":
-        path = backup_db()
-        if path:
-            await message.answer(f"Бэкап создан: {os.path.basename(path)}")
-        else:
-            await message.answer("База пуста, бэкап не создан.")
-        await start_cmd(message, state)
-        return
-    if message.text == "♻️ Восстановить из бэкапа":
-        ok = restore_last_backup()
-        if ok:
-            await message.answer("База успешно восстановлена из последнего бэкапа.")
-        else:
-            await message.answer("Бэкапы не найдены.")
-        await start_cmd(message, state)
-        return
-    await message.answer("Нажми кнопку!")
-
-# --- СТАТИСТИКА ---
-@dp.message(F.text == "📊 Статистика")
-async def show_stats(message: types.Message, state: FSMContext):
-    clients = load_db()
-    total = len(clients)
-    no_subs = sum(1 for c in clients if c.get("subscriptions", [{}])[0].get("name") == "отсутствует")
-    sub_stats = {}
-    region_stats = {}
-    months_stats = {}
-    for c in clients:
-        region = c.get("region", "—")
-        region_stats[region] = region_stats.get(region, 0) + 1
-        for sub in c.get("subscriptions", []):
-            n = sub.get("name")
-            d = sub.get("duration")
-            if n:
-                sub_stats[n] = sub_stats.get(n, 0) + 1
-            if d:
-                months_stats[d] = months_stats.get(d, 0) + 1
-    lines = [f"<b>Всего клиентов:</b> {total}",
-             f"<b>Без подписки:</b> {no_subs}",
-             "<b>Подписок по типу:</b>"]
-    for n, cnt in sub_stats.items():
-        lines.append(f"• {n}: {cnt}")
-    lines.append("<b>Длительность подписок:</b>")
-    for m, cnt in months_stats.items():
-        lines.append(f"• {m}: {cnt}")
-    lines.append("<b>Регионы:</b>")
-    for r, cnt in region_stats.items():
-        lines.append(f"• {r}: {cnt}")
-    await clear_chat(message)
-    await message.answer("\n".join(lines), reply_markup=main_menu())
-
 # --- ДОБАВЛЕНИЕ КЛИЕНТА ---
-# (ниже вся логика добавления клиента — полностью, как раньше)
-
 @dp.message(F.text == "➕ Добавить клиента")
 async def add_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -519,8 +439,6 @@ async def step_subs_yesno(message: types.Message, state: FSMContext):
         await state.set_state(AddEditClient.subscriptions_count)
         return
     await message.answer("Нажмите кнопку!")
-
-# --- (далее всё по шагам добавления: выбор подписки, игр, резерв-кодов и т.д., как ранее!) ---
 
 @dp.message(AddEditClient.subscriptions_count)
 async def step_subs_count(message: types.Message, state: FSMContext):
@@ -865,7 +783,7 @@ async def search_choose(message: types.Message, state: FSMContext):
         else:
             await message.answer(format_card(client)[0], reply_markup=edit_keyboard(client))
 
-# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ ---
+# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ, ОБРАБОТЧИКИ РЕДАКТИРОВАНИЯ ---
 
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
@@ -922,7 +840,11 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(AddEditClient.edit_games)
         return
 
-# --- РЕДАКТИРОВАНИЕ ПОЛЕЙ ---
+@dp.callback_query(F.data.startswith("save_"))
+async def save_client(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await clear_chat(callback.message)
+    await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
 
 @dp.message(AddEditClient.edit_input)
 async def edit_input_handler(message: types.Message, state: FSMContext):
@@ -1241,45 +1163,189 @@ async def edit_sub_2_start(message: types.Message, state: FSMContext):
         await message.answer(format_card(clients[idx])[0], reply_markup=edit_keyboard(clients[idx]))
     return
 
-# --- СОХРАНИТЬ ---
+# --- БЭКАП, ВЫГРУЗКА, ОЧИСТКА БАЗЫ ---
 
-@dp.callback_query(F.data.startswith("save_"))
-async def save_client(callback: types.CallbackQuery, state: FSMContext):
+@dp.message(F.text == "📂 База")
+async def base_menu_show(message: types.Message, state: FSMContext):
     await state.clear()
-    await clear_chat(callback.message)
-    await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
+    await clear_chat(message)
+    await message.answer("Меню базы:", reply_markup=base_menu())
+    await state.set_state(AddEditClient.awaiting_db_action)
 
-# --- УВЕДОМЛЕНИЯ: ДНИ РОЖДЕНИЯ И КОНЕЦ ПОДПИСКИ ---
-async def notify_sub_ends():
+@dp.message(AddEditClient.awaiting_db_action)
+async def base_menu_action(message: types.Message, state: FSMContext):
+    text = message.text
+    if text == "Выгрузка в чат":
+        clients = load_db()
+        await state.clear()
+        await clear_chat(message)
+        if not clients:
+            await message.answer("База пуста!")
+            await start_cmd(message, state)
+            return
+        for client in clients:
+            if client.get("reserve_photo_id"):
+                await message.answer_photo(client["reserve_photo_id"], caption=format_card(client)[0])
+            else:
+                await message.answer(format_card(client)[0])
+        await start_cmd(message, state)
+        return
+    if text == "Выгрузка в файл":
+        clients = load_db()
+        tmp_path = f"clients_export_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(clients, f, ensure_ascii=False, indent=2)
+        await bot.send_document(message.chat.id, InputFile(tmp_path))
+        os.remove(tmp_path)
+        await state.clear()
+        await start_cmd(message, state)
+        return
+    if text == "Сделать бэкап":
+        clients = load_db()
+        backup_path = f"clients_db_backup_{datetime.now().strftime('%Y%m%d')}.json"
+        with open(backup_path, "w", encoding="utf-8") as f:
+            json.dump(clients, f, ensure_ascii=False, indent=2)
+        await message.answer("Бэкап создан.")
+        return
+    if text == "Восстановить бэкап":
+        backup_path = f"clients_db_backup_{datetime.now().strftime('%Y%m%d')}.json"
+        if os.path.exists(backup_path):
+            with open(backup_path, "r", encoding="utf-8") as f:
+                clients = json.load(f)
+            save_db(clients)
+            await message.answer("Восстановление выполнено.")
+        else:
+            await message.answer("Бэкап за сегодня не найден.")
+        return
+    if text == "Очистить базу":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
+            ], resize_keyboard=True
+        )
+        await message.answer("Вы уверены, что хотите удалить всю базу?", reply_markup=kb)
+        await state.set_state(AddEditClient.awaiting_db_confirm)
+        return
+
+@dp.message(AddEditClient.awaiting_db_confirm)
+async def clear_base_confirm(message: types.Message, state: FSMContext):
+    if message.text == "Нет":
+        await state.clear()
+        await start_cmd(message, state)
+        return
+    if message.text == "Да":
+        save_db([])
+        await state.clear()
+        await clear_chat(message)
+        await message.answer("База полностью очищена.", reply_markup=main_menu())
+        return
+
+# --- СТАТИСТИКА ---
+@dp.message(F.text == "📊 Статистика")
+async def show_stats(message: types.Message, state: FSMContext):
     clients = load_db()
-    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%d.%m.%Y")
+    total = len(clients)
+    with_sub = [c for c in clients if c.get("subscriptions", [{"name": "отсутствует"}])[0].get("name") != "отсутствует"]
+    with_two = [c for c in clients if len(c.get("subscriptions", [])) == 2]
+    ps_deluxe = sum(1 for c in clients for s in c.get("subscriptions", []) if s.get("name") == "PS Plus Deluxe")
+    ps_extra = sum(1 for c in clients for s in c.get("subscriptions", []) if s.get("name") == "PS Plus Extra")
+    ps_ess = sum(1 for c in clients for s in c.get("subscriptions", []) if s.get("name") == "PS Plus Essential")
+    ea_play = sum(1 for c in clients for s in c.get("subscriptions", []) if s.get("name") == "EA Play")
+    region_ukr = sum(1 for c in clients if c.get("region") == "укр")
+    region_tur = sum(1 for c in clients if c.get("region") == "тур")
+    region_pol = sum(1 for c in clients if c.get("region") == "(польша)")
+    region_gb = sum(1 for c in clients if c.get("region") == "(британия)")
+    region_other = sum(1 for c in clients if c.get("region") not in ("укр", "тур", "(польша)", "(британия)"))
+    games_count = sum(len(c.get("games", [])) for c in clients)
+    now = datetime.now()
+    soon_subs = []
+    soon_bd = []
     for c in clients:
         for sub in c.get("subscriptions", []):
-            if sub.get("end") == tomorrow:
-                text, photo = format_card(c)
-                if c.get("reserve_photo_id"):
-                    await bot.send_photo(ADMIN_ID, c["reserve_photo_id"], caption=f"⚠️ Завтра заканчивается подписка:\n{text}", reply_markup=edit_keyboard(c))
-                else:
-                    await bot.send_message(ADMIN_ID, f"⚠️ Завтра заканчивается подписка:\n{text}", reply_markup=edit_keyboard(c))
+            try:
+                end = datetime.strptime(sub.get("end", ""), "%d.%m.%Y")
+                if 0 <= (end - now).days <= 7:
+                    soon_subs.append(c)
+            except: continue
+        try:
+            bdate = c.get("birth_date")
+            if bdate and bdate != "отсутствует":
+                dt = datetime.strptime(bdate, "%d.%m.%Y").replace(year=now.year)
+                if 0 <= (dt - now).days <= 7:
+                    soon_bd.append(c)
+        except: continue
+    text = (
+        "<b>Статистика CRM</b>\n\n"
+        f"👤 Клиентов: {total}\n"
+        f"💳 С подписками: {len(with_sub)}\n"
+        f"— PS Plus Deluxe: {ps_deluxe}\n"
+        f"— PS Plus Extra: {ps_extra}\n"
+        f"— PS Plus Essential: {ps_ess}\n"
+        f"— EA Play: {ea_play}\n"
+        f"🔁 Две подписки: {len(with_two)}\n\n"
+        f"🌍 Регионы:\nукр: {region_ukr} | тур: {region_tur} | польша: {region_pol} | британия: {region_gb} | др.: {region_other}\n\n"
+        f"🎮 Оформлено игр: {games_count}\n"
+        f"⏳ Подписки истекают (7 дней): {len(soon_subs)}\n"
+        f"🎂 День рождения скоро: {len(soon_bd)}\n"
+    )
+    await message.answer(text, reply_markup=main_menu())
+
+# --- УВЕДОМЛЕНИЯ О КОНЦЕ ПОДПИСКИ И ДНЯХ РОЖДЕНИЯ ---
+async def notify_sub_end():
+    clients = load_db()
+    now = datetime.now()
+    notify_list = []
+    for c in clients:
+        for sub in c.get("subscriptions", []):
+            try:
+                end = datetime.strptime(sub.get("end", ""), "%d.%m.%Y")
+                if (end - now).days == 1:
+                    notify_list.append((c, sub))
+            except: continue
+    for c, sub in notify_list:
+        text, photo_id = format_card(c, show_photo_id=True)
+        text = f"⏳ У клиента заканчивается подписка:\n{text}"
+        if photo_id:
+            await bot.send_photo(ADMIN_ID, photo_id, caption=text, reply_markup=edit_keyboard(c))
+        else:
+            await bot.send_message(ADMIN_ID, text, reply_markup=edit_keyboard(c))
 
 async def notify_birthdays():
     clients = load_db()
-    today = datetime.now().strftime("%d.%m.%Y")
+    now = datetime.now()
+    today = now.strftime("%d.%m")
+    notify_list = []
     for c in clients:
-        if c.get("birth_date") == today:
-            text, photo = format_card(c)
-            if c.get("reserve_photo_id"):
-                await bot.send_photo(ADMIN_ID, c["reserve_photo_id"], caption=f"🎉 Сегодня день рождения у:\n{text}", reply_markup=edit_keyboard(c))
-            else:
-                await bot.send_message(ADMIN_ID, f"🎉 Сегодня день рождения у:\n{text}", reply_markup=edit_keyboard(c))
+        bdate = c.get("birth_date", "")
+        if bdate and bdate != "отсутствует":
+            if today == bdate[:5]:
+                notify_list.append(c)
+    for c in notify_list:
+        text, photo_id = format_card(c, show_photo_id=True)
+        text = f"🎂 Сегодня у клиента день рождения!\n{text}"
+        if photo_id:
+            await bot.send_photo(ADMIN_ID, photo_id, caption=text, reply_markup=edit_keyboard(c))
+        else:
+            await bot.send_message(ADMIN_ID, text, reply_markup=edit_keyboard(c))
 
-def schedule_notifications():
-    scheduler.add_job(notify_sub_ends, 'cron', hour=9, minute=0)
-    scheduler.add_job(notify_birthdays, 'cron', hour=9, minute=0)
+scheduler.add_job(notify_sub_end, 'cron', hour=9, minute=0)
+scheduler.add_job(notify_birthdays, 'cron', hour=9, minute=1)
+
+# --- КНОПКИ БАЗЫ ---
+
+def base_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Выгрузка в чат"), KeyboardButton(text="Выгрузка в файл")],
+            [KeyboardButton(text="Сделать бэкап"), KeyboardButton(text="Восстановить бэкап")],
+            [KeyboardButton(text="Очистить базу")],
+            [KeyboardButton(text="❌ Отмена")]
+        ],
+        resize_keyboard=True
+    )
 
 # --- ЗАПУСК ---
 async def main():
-    schedule_notifications()
     scheduler.start()
     await dp.start_polling(bot)
 
