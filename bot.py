@@ -2,6 +2,7 @@ import asyncio
 import os
 import json
 import shutil
+import glob
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
@@ -9,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton
+    InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -107,7 +108,7 @@ def delete_client(client_id):
 class AddEditClient(StatesGroup):
     contact = State()
     birthdate_yesno = State()
-    birth_date = State()
+    birthdate = State()
     account = State()
     region = State()
     console = State()
@@ -308,11 +309,11 @@ async def step_birthdate_ask(message: types.Message, state: FSMContext):
         await message.answer("Введите дату рождения (дд.мм.гггг):",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.set_state(AddEditClient.birth_date)
+        await state.set_state(AddEditClient.birthdate)
         return
     await message.answer("Нажмите кнопку!")
 
-@dp.message(AddEditClient.birth_date)
+@dp.message(AddEditClient.birthdate)
 async def step_birthdate(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.clear()
@@ -433,6 +434,7 @@ async def sub_select(message, state: FSMContext, sub_num=1, only_one=False):
     else:
         data = await state.get_data()
         prev = data.get("sub_1_type")
+        kb = None
         if prev == "EA Play":
             kb = ReplyKeyboardMarkup(
                 keyboard=[
@@ -608,6 +610,8 @@ async def sub2_start(message: types.Message, state: FSMContext):
     await state.update_data(sub_2=sub, subscriptions=subs)
     await ask_games(message, state)
 
+# --- ДОБАВЛЕНИЕ: ИГРЫ, РЕЗЕРВНЫЕ КОДЫ, ФИНАЛ ---
+
 async def ask_games(message, state: FSMContext):
     await message.answer("Оформлены игры?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
@@ -726,8 +730,8 @@ async def do_find(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    # Если ожидается редактирование, а не поиск
     data = await state.get_data()
+    # Если редактирование
     if data.get("edit_id") and data.get("edit_field"):
         cid = data.get("edit_id")
         field = data.get("edit_field")
@@ -905,6 +909,8 @@ async def edit_reserve_handler(message: types.Message, state: FSMContext):
             return
     await message.answer("Ошибка при обновлении.")
     await state.clear()
+
+# --- МАСТЕР РЕДАКТИРОВАНИЯ ПОДПИСКИ ---
 
 @dp.message(AddEditClient.edit_subs_total)
 async def edit_subs_total(message: types.Message, state: FSMContext):
@@ -1137,17 +1143,172 @@ async def edit_sub_2_start(message: types.Message, state: FSMContext):
         await message.answer(text, reply_markup=edit_keyboard(clients[idx]))
     return
 
+# --- СОХРАНИТЬ ИЗМЕНЕНИЯ ---
+
 @dp.callback_query(F.data.startswith("save_"))
 async def save_client(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await clear_chat(callback.message)
     await callback.message.answer("Изменения сохранены! Возврат в главное меню.", reply_markup=main_menu())
 
+# --- БАЗА: Выгрузка и управление ---
+
+@dp.message(F.text == "📦 База")
+async def base_menu_handler(message: types.Message, state: FSMContext):
+    await clear_chat(message)
+    await message.answer("Меню базы данных:", reply_markup=base_menu())
+
+@dp.message(F.text == "Выгрузить всю базу в чат")
+async def export_db_chat(message: types.Message):
+    clients = load_db()
+    if not clients:
+        await message.answer("База пустая.")
+        return
+    for c in clients:
+        text, photo_id = format_card(c, show_photo_id=True)
+        if photo_id:
+            await message.answer_photo(photo_id, caption=text)
+        else:
+            await message.answer(text)
+
+@dp.message(F.text == "Выгрузить всю базу в файл")
+async def export_db_file(message: types.Message):
+    clients = load_db()
+    if not clients:
+        await message.answer("База пустая.")
+        return
+    temp_filename = "clients_export.txt"
+    with open(temp_filename, "w", encoding="utf-8") as f:
+        for c in clients:
+            text, _ = format_card(c)
+            f.write(text + "\n\n")
+    await message.answer_document(InputFile(temp_filename))
+    os.remove(temp_filename)
+
+@dp.message(F.text == "Очистить базу")
+async def clear_db_start(message: types.Message, state: FSMContext):
+    await message.answer("Вы уверены? Это удалит всю базу навсегда.\nНапишите 'ДА' для подтверждения или '❌ Отмена' для отмены.")
+    await state.set_state(AddEditClient.awaiting_confirm_clear)
+
+@dp.message(AddEditClient.awaiting_confirm_clear)
+async def clear_db_confirm(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await start_cmd(message, state)
+        return
+    if message.text.upper() == "ДА":
+        if os.path.exists(DB_FILE):
+            os.remove(DB_FILE)
+        await message.answer("База очищена.")
+        await state.clear()
+        await start_cmd(message, state)
+    else:
+        await message.answer("Отмена. Главное меню.")
+        await state.clear()
+        await start_cmd(message, state)
+
+@dp.message(F.text == "Сделать бэкап базы")
+async def backup_db(message: types.Message):
+    if not os.path.exists(DB_FILE):
+        await message.answer("База пуста, бэкап невозможен.")
+        return
+    backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+    shutil.copy(DB_FILE, backup_name)
+    await message.answer(f"Бэкап создан: {backup_name}")
+
+@dp.message(F.text == "Восстановить из бэкапа")
+async def restore_db_start(message: types.Message, state: FSMContext):
+    backups = glob.glob("backup_*.bak")
+    if not backups:
+        await message.answer("Бэкапы не найдены.")
+        return
+    buttons = [[KeyboardButton(text=b)] for b in backups]
+    buttons.append([KeyboardButton(text="❌ Отмена")])
+    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    await message.answer("Выберите бэкап для восстановления:", reply_markup=kb)
+    await state.set_state(AddEditClient.awaiting_backup_choice)
+
+@dp.message(AddEditClient.awaiting_backup_choice)
+async def restore_db_confirm(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await start_cmd(message, state)
+        return
+    backup_file = message.text.strip()
+    if not os.path.exists(backup_file):
+        await message.answer("Файл не найден, попробуйте ещё раз.")
+        return
+    shutil.copy(backup_file, DB_FILE)
+    await message.answer(f"База восстановлена из {backup_file}.")
+    await state.clear()
+    await start_cmd(message, state)
+
+# --- СТАТИСТИКА ---
+
+@dp.message(F.text == "📊 Статистика")
+async def stats_handler(message: types.Message):
+    clients = load_db()
+    total = len(clients)
+    subs_count = 0
+    games_count = 0
+    subs_expiring = 0
+    birthdays_soon = 0
+    no_subs = 0
+    regions = {}
+    now = datetime.now()
+    for c in clients:
+        subs = c.get("subscriptions", [])
+        if subs and subs[0].get("name") != "отсутствует":
+            subs_count += 1
+            for sub in subs:
+                try:
+                    end_date = datetime.strptime(sub.get("end", "01.01.1970"), "%d.%m.%Y")
+                    if 0 <= (end_date - now).days <= 7:
+                        subs_expiring += 1
+                except:
+                    pass
+        else:
+            no_subs += 1
+        if c.get("games"):
+            games_count += len(c.get("games", []))
+        bdate_str = c.get("birth_date", "отсутствует")
+        if bdate_str != "отсутствует":
+            try:
+                bdate = datetime.strptime(bdate_str, "%d.%m.%Y")
+                next_birthday = bdate.replace(year=now.year)
+                if next_birthday < now:
+                    next_birthday = next_birthday.replace(year=now.year + 1)
+                days_to_bday = (next_birthday - now).days
+                if 0 <= days_to_bday <= 7:
+                    birthdays_soon += 1
+            except:
+                pass
+        reg = c.get("region", "—")
+        regions[reg] = regions.get(reg, 0) + 1
+
+    text = (
+        f"📊 <b>Статистика базы:</b>\n"
+        f"Всего клиентов: <b>{total}</b>\n"
+        f"С подписками: <b>{subs_count}</b>\n"
+        f"Без подписок: <b>{no_subs}</b>\n"
+        f"Подписки заканчиваются за 7 дней: <b>{subs_expiring}</b>\n"
+        f"Игры оформлено: <b>{games_count}</b>\n"
+        f"Дней рождения скоро (7 дней): <b>{birthdays_soon}</b>\n"
+        f"\n🌍 <b>Регионы:</b>"
+    )
+    for reg, count in regions.items():
+        text += f"\n- {reg}: {count}"
+    await message.answer(text)
+
+# --- ОЧИСТКА ЧАТА ---
+
 @dp.message(F.text == "❌ Отмена")
 async def cancel_any(message: types.Message, state: FSMContext):
     await state.clear()
     await clear_chat(message)
     await message.answer("Главное меню", reply_markup=main_menu())
+
+# --- ЗАПУСК БОТА ---
 
 async def main():
     scheduler.start()
