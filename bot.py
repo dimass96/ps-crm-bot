@@ -1441,9 +1441,9 @@ async def restore_backup_select(message: types.Message, state: FSMContext):
         resize_keyboard=True
     )
     await message.answer("Выберите бэкап для восстановления:", reply_markup=kb)
-    await state.set_state(AddEditClient.awaiting_confirm)
+    await state.set_state(AddEditClient.awaiting_confirm_restore)
 
-@dp.message(AddEditClient.awaiting_confirm)
+@dp.message(AddEditClient.awaiting_confirm_restore)
 async def restore_backup_apply(message: types.Message, state: FSMContext):
     fname = message.text
     if fname == "❌ Отмена":
@@ -1465,9 +1465,9 @@ async def clear_db_ask(message: types.Message, state: FSMContext):
         resize_keyboard=True
     )
     await message.answer("Уверены, что хотите удалить ВСЮ базу?", reply_markup=kb)
-    await state.set_state(AddEditClient.awaiting_confirm)
+    await state.set_state(AddEditClient.awaiting_confirm_clear)
 
-@dp.message(AddEditClient.awaiting_confirm)
+@dp.message(AddEditClient.awaiting_confirm_clear)
 async def clear_db_confirm(message: types.Message, state: FSMContext):
     if message.text == "Нет":
         await state.clear()
