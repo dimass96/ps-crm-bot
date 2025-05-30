@@ -143,11 +143,13 @@ def edit_keyboard(client):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📱 Номер", callback_data=f"edit_contact_{client['id']}"),
-            InlineKeyboardButton(text="🛡 Данные", callback_data=f"edit_account_{client['id']}"),
-            InlineKeyboardButton(text="💳 Подписка", callback_data=f"edit_sub_{client['id']}")
+            InlineKeyboardButton(text="🛡 Данные", callback_data=f"edit_account_{client['id']}")
         ],
         [
-            InlineKeyboardButton(text="🎮 Игры", callback_data=f"edit_games_{client['id']}"),
+            InlineKeyboardButton(text="💳 Подписка", callback_data=f"edit_sub_{client['id']}"),
+            InlineKeyboardButton(text="🎮 Игры", callback_data=f"edit_games_{client['id']}")
+        ],
+        [
             InlineKeyboardButton(text="🖼 Рез.коды", callback_data=f"edit_reserve_{client['id']}"),
             InlineKeyboardButton(text="🕹 Консоль", callback_data=f"edit_console_{client['id']}")
         ],
