@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime
 from cryptography.fernet import Fernet
 
 DB_FILE = "/data/clients_db.json"
@@ -28,15 +29,15 @@ ENCRYPT_KEY = load_key()
 def load_db():
     if not os.path.exists(DB_FILE):
         return []
-    try:
-        with open(DB_FILE, "rb") as f:
+    with open(DB_FILE, "rb") as f:
+        try:
             encrypted = f.read()
             if not encrypted:
                 return []
             decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
             return json.loads(decrypted)
-    except Exception:
-        return []
+        except Exception:
+            return []
 
 def save_db(data):
     if os.path.exists(DB_FILE):
