@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, ContentTypeFilter
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton, InputFile
@@ -17,10 +17,8 @@ from aiogram.fsm.state import StatesGroup, State
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from cryptography.fernet import Fernet
 
-DATA_DIR = "/data"  # Обязательно для Railway volume монтирования
-DB_FILE = os.path.join(DATA_DIR, "clients_db.json")
-KEY_FILE = os.path.join(DATA_DIR, "secret.key")
-
+DB_FILE = "/data/clients_db.json"  # Путь /data для Railway volume
+KEY_FILE = "secret.key"
 API_TOKEN = "7636123092:AAEAnU8iuShy7UHjH2cwzt1vRA-Pl3e3od8"
 ADMIN_ID = 350902460
 
@@ -58,7 +56,6 @@ def load_db():
             return []
 
 def save_db(data):
-    # Делать бэкап при сохранении
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
             backup.write(orig.read())
@@ -143,6 +140,7 @@ class AddEditClient(StatesGroup):
     edit_sub_2_duration = State()
     edit_sub_2_start = State()
     awaiting_backup_choice = State()
+    # Для очистки и восстановления
     awaiting_confirm_clear = State()
     awaiting_confirm_restore = State()
 
@@ -465,29 +463,20 @@ async def sub1_type(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    valid = ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play", "Нет подписки"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
-        return
     if message.text == "Нет подписки":
         await state.update_data(subscriptions=[{"name": "отсутствует"}])
         await ask_games(message, state)
         return
+    if message.text not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play"):
+        await message.answer("Выберите подписку кнопкой!")
+        return
     await state.update_data(sub_1_type=message.text)
-    # Сроки для подписок
-    if message.text in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
+    kb = None
+    if message.text == "EA Play":
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     else:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
-    await message.answer("Выберите срок подписки:", reply_markup=kb)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    await message.answer("Выберите срок:", reply_markup=kb)
     await state.set_state(AddEditClient.sub_1_duration)
 
 @dp.message(AddEditClient.sub_1_duration)
@@ -497,18 +486,15 @@ async def sub1_duration(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    valid = ["1м", "3м", "12м"]
     data = await state.get_data()
-    sub_type = data.get("sub_1_type", "")
-    if sub_type == "EA Play":
-        valid = ["1м", "12м"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
+    sub_1_type = data.get("sub_1_type")
+    if (sub_1_type == "EA Play" and message.text not in ("1м", "12м")) or \
+       (sub_1_type != "EA Play" and message.text not in ("1м", "3м", "12м")):
+        await message.answer("Выберите срок кнопкой!")
         return
     await state.update_data(sub_1_duration=message.text)
-    await message.answer("Введите дату оформления (дд.мм.гггг):",
-                         reply_markup=ReplyKeyboardMarkup(
-                             keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
+    await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.sub_1_start)
 
 @dp.message(AddEditClient.sub_1_start)
@@ -519,17 +505,33 @@ async def sub1_start(message: types.Message, state: FSMContext):
         await start_cmd(message, state)
         return
     try:
-        dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+        start = datetime.strptime(message.text.strip(), "%d.%m.%Y")
     except:
         await message.answer("Формат даты: дд.мм.гггг")
         return
-    await state.update_data(sub_1_start=message.text.strip())
     data = await state.get_data()
-    total = data.get("subs_total", 1)
-    if total == 2:
-        await sub_select(message, state, sub_num=2, only_one=False)
+    duration = data.get("sub_1_duration")
+    months = int(duration.replace("м", ""))
+    try:
+        year = start.year + (start.month - 1 + months) // 12
+        month = (start.month - 1 + months) % 12 + 1
+        day = start.day
+        end = start.replace(year=year, month=month, day=day)
+    except:
+        end = start + timedelta(days=months*30)
+    sub = {
+        "name": data.get("sub_1_type"),
+        "duration": duration,
+        "start": message.text.strip(),
+        "end": end.strftime("%d.%m.%Y")
+    }
+    await state.update_data(sub_1=sub)
+    subs_total = data.get("subs_total", 1)
+    if subs_total == 2:
+        await sub_select(message, state, sub_num=2)
     else:
-        await assemble_subscriptions(message, state)
+        await state.update_data(subscriptions=[sub])
+        await ask_games(message, state)
 
 @dp.message(AddEditClient.sub_2_type)
 async def sub2_type(message: types.Message, state: FSMContext):
@@ -538,33 +540,28 @@ async def sub2_type(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    data = await state.get_data()
-    prev_type = data.get("sub_1_type", "")
-    valid = []
-    if prev_type == "EA Play":
-        valid = ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "Нет подписки"]
-    else:
-        valid = ["EA Play", "Нет подписки"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
-        return
     if message.text == "Нет подписки":
-        await assemble_subscriptions(message, state)
+        data = await state.get_data()
+        await state.update_data(subscriptions=[data.get("sub_1")])
+        await ask_games(message, state)
         return
-    await state.update_data(sub_2_type=message.text)
-    if message.text in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
+    data = await state.get_data()
+    prev = data.get("sub_1_type")
+    if prev == "EA Play":
+        if message.text not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"):
+            await message.answer("Выберите PS Plus!")
+            return
     else:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
-    await message.answer("Выберите срок подписки:", reply_markup=kb)
+        if message.text != "EA Play":
+            await message.answer("Выберите EA Play!")
+            return
+    await state.update_data(sub_2_type=message.text)
+    kb = None
+    if message.text == "EA Play":
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    else:
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    await message.answer("Выберите срок:", reply_markup=kb)
     await state.set_state(AddEditClient.sub_2_duration)
 
 @dp.message(AddEditClient.sub_2_duration)
@@ -574,18 +571,15 @@ async def sub2_duration(message: types.Message, state: FSMContext):
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    valid = ["1м", "3м", "12м"]
     data = await state.get_data()
-    sub_type = data.get("sub_2_type", "")
-    if sub_type == "EA Play":
-        valid = ["1м", "12м"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
+    sub_2_type = data.get("sub_2_type")
+    if (sub_2_type == "EA Play" and message.text not in ("1м", "12м")) or \
+       (sub_2_type != "EA Play" and message.text not in ("1м", "3м", "12м")):
+        await message.answer("Выберите срок кнопкой!")
         return
     await state.update_data(sub_2_duration=message.text)
-    await message.answer("Введите дату оформления (дд.мм.гггг):",
-                         reply_markup=ReplyKeyboardMarkup(
-                             keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
+    await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.sub_2_start)
 
 @dp.message(AddEditClient.sub_2_start)
@@ -596,51 +590,34 @@ async def sub2_start(message: types.Message, state: FSMContext):
         await start_cmd(message, state)
         return
     try:
-        dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+        start = datetime.strptime(message.text.strip(), "%d.%m.%Y")
     except:
         await message.answer("Формат даты: дд.мм.гггг")
         return
-    await state.update_data(sub_2_start=message.text.strip())
-    await assemble_subscriptions(message, state)
-
-async def assemble_subscriptions(message, state: FSMContext):
     data = await state.get_data()
-    subs = []
-    # Подписка 1
-    sub_1_type = data.get("sub_1_type")
-    sub_1_duration = data.get("sub_1_duration")
-    sub_1_start = data.get("sub_1_start")
-    if sub_1_type and sub_1_type != "Нет подписки":
-        start_dt = datetime.strptime(sub_1_start, "%d.%m.%Y")
-        months = int(sub_1_duration.replace("м", ""))
-        end_dt = start_dt + timedelta(days=30 * months)
-        subs.append({
-            "name": sub_1_type,
-            "duration": sub_1_duration,
-            "start": sub_1_start,
-            "end": end_dt.strftime("%d.%m.%Y")
-        })
-    # Подписка 2
-    sub_2_type = data.get("sub_2_type")
-    sub_2_duration = data.get("sub_2_duration")
-    sub_2_start = data.get("sub_2_start")
-    if sub_2_type and sub_2_type != "Нет подписки":
-        start_dt = datetime.strptime(sub_2_start, "%d.%m.%Y")
-        months = int(sub_2_duration.replace("м", ""))
-        end_dt = start_dt + timedelta(days=30 * months)
-        subs.append({
-            "name": sub_2_type,
-            "duration": sub_2_duration,
-            "start": sub_2_start,
-            "end": end_dt.strftime("%d.%m.%Y")
-        })
-    if not subs:
-        subs = [{"name": "отсутствует"}]
-    await state.update_data(subscriptions=subs)
+    duration = data.get("sub_2_duration")
+    months = int(duration.replace("м", ""))
+    try:
+        year = start.year + (start.month - 1 + months) // 12
+        month = (start.month - 1 + months) % 12 + 1
+        day = start.day
+        end = start.replace(year=year, month=month, day=day)
+    except:
+        end = start + timedelta(days=months*30)
+    sub = {
+        "name": data.get("sub_2_type"),
+        "duration": duration,
+        "start": message.text.strip(),
+        "end": end.strftime("%d.%m.%Y")
+    }
+    subs = [data.get("sub_1"), sub]
+    await state.update_data(sub_2=sub, subscriptions=subs)
     await ask_games(message, state)
 
+# --- ДОБАВЛЕНИЕ: ИГРЫ, РЕЗЕРВНЫЕ КОДЫ, ФИНАЛ ---
+
 async def ask_games(message, state: FSMContext):
-    await message.answer("Есть оформленные игры?", reply_markup=ReplyKeyboardMarkup(
+    await message.answer("Оформлены игры?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
             [KeyboardButton(text="❌ Отмена")]
@@ -648,7 +625,7 @@ async def ask_games(message, state: FSMContext):
     await state.set_state(AddEditClient.games_yesno)
 
 @dp.message(AddEditClient.games_yesno)
-async def step_games_yesno(message: types.Message, state: FSMContext):
+async def games_yesno(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
@@ -659,34 +636,26 @@ async def step_games_yesno(message: types.Message, state: FSMContext):
         await ask_reserve(message, state)
         return
     if message.text == "Да":
-        await message.answer("Вводите список игр, каждую с новой строки. Когда закончите, отправьте /done",
-                             reply_markup=ReplyKeyboardMarkup(
-                                 keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.update_data(games=[])
+        await message.answer("Введи список игр (каждая с новой строки):", 
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
         await state.set_state(AddEditClient.games_input)
         return
     await message.answer("Нажмите кнопку!")
 
 @dp.message(AddEditClient.games_input)
-async def step_games_input(message: types.Message, state: FSMContext):
-    if message.text == "/done":
-        data = await state.get_data()
-        games = data.get("games", [])
-        await ask_reserve(message, state)
-        return
+async def games_input(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    data = await state.get_data()
-    games = data.get("games", [])
-    games.append(message.text.strip())
+    games = [line.strip() for line in message.text.strip().split("\n") if line.strip()]
     await state.update_data(games=games)
-    await message.answer(f"Добавлено: {message.text.strip()}\nПродолжайте или отправьте /done")
+    await ask_reserve(message, state)
 
 async def ask_reserve(message, state: FSMContext):
-    await message.answer("Есть резервные коды?", reply_markup=ReplyKeyboardMarkup(
+    await message.answer("Есть ли резервные коды?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
             [KeyboardButton(text="❌ Отмена")]
@@ -694,7 +663,7 @@ async def ask_reserve(message, state: FSMContext):
     await state.set_state(AddEditClient.reserve_yesno)
 
 @dp.message(AddEditClient.reserve_yesno)
-async def step_reserve_yesno(message: types.Message, state: FSMContext):
+async def reserve_yesno(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
@@ -702,327 +671,366 @@ async def step_reserve_yesno(message: types.Message, state: FSMContext):
         return
     if message.text == "Нет":
         await state.update_data(reserve_photo_id=None)
-        await final_step(message, state)
+        await finish_client(message, state)
         return
     if message.text == "Да":
-        await message.answer("Загрузите фото резерв-кодов:", reply_markup=ReplyKeyboardMarkup(
+        await message.answer("Загрузите скриншот (фото):", reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
         await state.set_state(AddEditClient.reserve_photo)
         return
     await message.answer("Нажмите кнопку!")
 
-@dp.message(AddEditClient.reserve_photo, content_types=types.ContentType.PHOTO)
-async def step_reserve_photo(message: types.Message, state: FSMContext):
-    photo = message.photo[-1]
-    await state.update_data(reserve_photo_id=photo.file_id)
-    await final_step(message, state)
+@dp.message(AddEditClient.reserve_photo, ContentTypeFilter(content_types=[types.ContentType.PHOTO]))
+async def reserve_photo(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await clear_chat(message)
+        await start_cmd(message, state)
+        return
+    if not message.photo:
+        await message.answer("Отправьте фото!")
+        return
+    photo_id = message.photo[-1].file_id
+    await state.update_data(reserve_photo_id=photo_id)
+    await finish_client(message, state)
 
-@dp.message(AddEditClient.reserve_photo)
-async def step_reserve_photo_nonphoto(message: types.Message):
-    await message.answer("Пожалуйста, загрузите фото.")
-
-async def final_step(message, state: FSMContext):
+async def finish_client(message, state: FSMContext):
     data = await state.get_data()
     client = {
         "id": get_next_client_id(load_db()),
-        "contact": data.get("contact"),
-        "birth_date": data.get("birth_date"),
-        "account": data.get("account"),
-        "region": data.get("region"),
-        "console": data.get("console"),
-        "subscriptions": data.get("subscriptions"),
-        "games": data.get("games"),
-        "reserve_photo_id": data.get("reserve_photo_id"),
-        "added_date": datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        "contact": data.get("contact", ""),
+        "birth_date": data.get("birth_date", "отсутствует"),
+        "account": data.get("account", {}),
+        "region": data.get("region", ""),
+        "console": data.get("console", ""),
+        "subscriptions": data.get("subscriptions", []),
+        "games": data.get("games", []),
+        "reserve_photo_id": data.get("reserve_photo_id")
     }
     save_new_client(client)
+    await state.clear()
     await clear_chat(message)
     text, photo_id = format_card(client, show_photo_id=True)
-    await message.answer("Клиент добавлен:\n\n" + text)
     if photo_id:
-        await message.answer_photo(photo=photo_id)
-    await state.clear()
-    await start_cmd(message, state)
+        await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(client))
+    else:
+        await message.answer(text, reply_markup=edit_keyboard(client))
 
 # --- ПОИСК КЛИЕНТА ---
 @dp.message(F.text == "🔍 Найти клиента")
-async def search_start(message: types.Message, state: FSMContext):
+async def find_start(message: types.Message, state: FSMContext):
+    await state.clear()
     await clear_chat(message)
-    await message.answer("Введите номер телефона или Telegram для поиска:",
-                         reply_markup=ReplyKeyboardMarkup(
-                             keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-    await state.set_state(AddEditClient.contact)
-
-@dp.message(AddEditClient.contact)
-async def search_query(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await state.clear()
-        await clear_chat(message)
-        await start_cmd(message, state)
-        return
-    clients = find_clients(message.text.strip())
-    if not clients:
-        await message.answer("Клиент не найден.")
-        await state.clear()
-        await start_cmd(message, state)
-        return
-    # Показываем первого найденного
-    client = clients[0]
-    await state.update_data(search_result=client)
-    text, photo_id = format_card(client, show_photo_id=True)
-    kb = edit_keyboard(client)
-    await message.answer(text, reply_markup=kb)
-    if photo_id:
-        await message.answer_photo(photo=photo_id)
-    await state.set_state(AddEditClient.edit_choose)
-
-# --- ОБРАБОТКА КНОПОК РЕДАКТИРОВАНИЯ ---
-@dp.callback_query(lambda c: c.data and c.data.startswith("edit_"))
-async def edit_handler(callback: types.CallbackQuery, state: FSMContext):
-    data = callback.data
-    client_id = int(data.split("_")[-1])
-    clients = load_db()
-    client = next((c for c in clients if c["id"] == client_id), None)
-    if not client:
-        await callback.answer("Клиент не найден")
-        return
-    field = data.split("_")[1]
-    await state.update_data(edit_client=client)
-    if field == "contact":
-        await callback.message.answer("Введите новый номер/TG клиента:", reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.set_state(AddEditClient.edit_input)
-        await state.update_data(edit_field="contact")
-    elif field == "account":
-        await callback.message.answer("Введите новые данные (логин, пароль, почта-пароль) через новую строку:",
-                                      reply_markup=ReplyKeyboardMarkup(
-                                          keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.set_state(AddEditClient.edit_input)
-        await state.update_data(edit_field="account")
-    elif field == "region":
-        await callback.message.answer("Выберите регион:", reply_markup=region_btns())
-        await state.set_state(AddEditClient.edit_input)
-        await state.update_data(edit_field="region")
-    elif field == "console":
-        await callback.message.answer("Выберите консоль:", reply_markup=console_btns())
-        await state.set_state(AddEditClient.edit_input)
-        await state.update_data(edit_field="console")
-    elif field == "birth":
-        await callback.message.answer("Введите новую дату рождения (дд.мм.гггг):",
-                                      reply_markup=ReplyKeyboardMarkup(
-                                          keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.set_state(AddEditClient.edit_input)
-        await state.update_data(edit_field="birth_date")
-    elif field == "reserve":
-        await callback.message.answer("Загрузите новое фото резерв-кодов:",
-                                      reply_markup=ReplyKeyboardMarkup(
-                                          keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.set_state(AddEditClient.edit_reserve)
-    elif field == "games":
-        await callback.message.answer("Вводите игры, каждую с новой строки. Для окончания /done:",
-                                      reply_markup=ReplyKeyboardMarkup(
-                                          keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.update_data(edit_games=client.get("games", []))
-        await state.set_state(AddEditClient.edit_games)
-    elif field == "sub":
-        # Запустить мастер редактирования подписок
-        await callback.message.answer("Редактирование подписок.\nВведите 1 для первой подписки, 2 для второй, или 0 для отмены:")
-        await state.set_state(AddEditClient.edit_subs_master)
-    elif field == "save":
-        await update_client(client)
-        await callback.message.answer("Изменения сохранены! Возврат в главное меню.")
-        await clear_chat(callback.message)
-        await start_cmd(callback.message, state)
-    else:
-        await callback.answer("Неизвестная команда.")
+    await message.answer(
+        "Введите любой поисковый запрос (номер/TG, имя, регион, логин, игра и т.д.):",
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    )
+    await state.set_state(AddEditClient.edit_input)
 
 @dp.message(AddEditClient.edit_input)
-async def edit_input_handler(message: types.Message, state: FSMContext):
+async def do_find(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
+    # Если ожидается редактирование, а не поиск
     data = await state.get_data()
-    client = data.get("edit_client")
-    field = data.get("edit_field")
-    if not client or not field:
-        await message.answer("Ошибка. Попробуйте снова.")
+    if data.get("edit_id") and data.get("edit_field"):
+        cid = data.get("edit_id")
+        field = data.get("edit_field")
+        clients = load_db()
+        for i, c in enumerate(clients):
+            if c["id"] == cid:
+                if field == "contact":
+                    c["contact"] = message.text.strip()
+                elif field == "birth_date":
+                    c["birth_date"] = message.text.strip()
+                elif field == "account":
+                    rows = message.text.strip().split("\n")
+                    login = rows[0].strip() if len(rows) > 0 else ""
+                    password = rows[1].strip() if len(rows) > 1 else ""
+                    mail_pass = rows[2].strip() if len(rows) > 2 else ""
+                    c["account"] = {"login": login, "password": password, "mail_pass": mail_pass}
+                elif field == "console":
+                    c["console"] = message.text.strip()
+                elif field == "region":
+                    c["region"] = message.text.strip()
+                clients[i] = c
+                save_db(clients)
+                await state.clear()
+                await clear_chat(message)
+                text, photo_id = format_card(c, show_photo_id=True)
+                if photo_id:
+                    await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(c))
+                else:
+                    await message.answer(text, reply_markup=edit_keyboard(c))
+                return
+        await message.answer("Ошибка при обновлении.")
+        await state.clear()
+        return
+    # Обычный поиск
+    results = find_clients(message.text.strip())
+    if not results:
+        await message.answer("Клиентов не найдено.")
         await start_cmd(message, state)
         return
-    if field == "contact":
-        client["contact"] = message.text.strip()
-    elif field == "account":
-        rows = message.text.strip().split("\n")
-        login = rows[0].strip() if len(rows) > 0 else ""
-        password = rows[1].strip() if len(rows) > 1 else ""
-        mail_pass = rows[2].strip() if len(rows) > 2 else ""
-        client["account"] = {"login": login, "password": password, "mail_pass": mail_pass}
-    elif field == "region":
-        if message.text not in ("(укр)", "(тур)", "(польша)", "(британия)", "(другой)"):
-            await message.answer("Нажмите кнопку!")
-            return
-        client["region"] = message.text
-    elif field == "console":
-        if message.text not in ("PS4", "PS5", "PS4/PS5"):
-            await message.answer("Нажмите кнопку!")
-            return
-        client["console"] = message.text
-    elif field == "birth_date":
-        try:
-            datetime.strptime(message.text.strip(), "%d.%m.%Y")
-            client["birth_date"] = message.text.strip()
-        except:
-            await message.answer("Формат даты: дд.мм.гггг")
-            return
-    else:
-        await message.answer("Ошибка. Попробуйте снова.")
+    for client in results:
+        text, photo_id = format_card(client, show_photo_id=True)
+        if photo_id:
+            await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(client))
+        else:
+            await message.answer(text, reply_markup=edit_keyboard(client))
+
+# --- ИНЛАЙН-КНОПКИ РЕДАКТИРОВАНИЯ ---
+
+@dp.callback_query(F.data.startswith("edit_"))
+async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
+    act, field, cid = callback.data.split("_", 2)
+    cid = int(cid)
+    clients = load_db()
+    client = next((c for c in clients if c["id"] == cid), None)
+    if not client:
+        await callback.message.answer("Клиент не найден!")
         return
-    await update_client(client)
-    await message.answer("Изменения обновлены.")
-    await clear_chat(message)
-    text, photo_id = format_card(client, show_photo_id=True)
-    kb = edit_keyboard(client)
-    await message.answer(text, reply_markup=kb)
-    if photo_id:
-        await message.answer_photo(photo=photo_id)
-    await state.update_data(edit_client=client)
-    await state.set_state(AddEditClient.edit_choose)
+    await state.clear()
+    await state.update_data(edit_id=cid)
+    if field == "contact":
+        await callback.message.answer(
+            "Введите новый номер телефона или Telegram:",
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+        )
+        await state.set_state(AddEditClient.edit_input)
+        await state.update_data(edit_field="contact")
+        return
+    if field == "birth":
+        await callback.message.answer(
+            "Введите новую дату рождения (дд.мм.гггг) или 'отсутствует':",
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+        )
+        await state.set_state(AddEditClient.edit_input)
+        await state.update_data(edit_field="birth_date")
+        return
+    if field == "account":
+        await callback.message.answer(
+            "Введи:\n1. Логин\n2. Пароль\n3. Почта-пароль (можно пропустить)\n\nКаждый пункт с новой строки.",
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+        )
+        await state.set_state(AddEditClient.edit_input)
+        await state.update_data(edit_field="account")
+        return
+    if field == "console":
+        await callback.message.answer("Выбери консоль:", reply_markup=console_btns())
+        await state.set_state(AddEditClient.edit_input)
+        await state.update_data(edit_field="console")
+        return
+    if field == "region":
+        await callback.message.answer("Выбери регион аккаунта:", reply_markup=region_btns())
+        await state.set_state(AddEditClient.edit_input)
+        await state.update_data(edit_field="region")
+        return
+    if field == "reserve":
+        await callback.message.answer(
+            "Загрузите новое фото резерв-кодов:",
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+        )
+        await state.set_state(AddEditClient.edit_reserve)
+        return
+    if field == "sub":
+        await callback.message.answer(
+            "Сколько подписок?",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Одна"), KeyboardButton(text="Две")],
+                    [KeyboardButton(text="Нет подписки")],
+                    [KeyboardButton(text="❌ Отмена")]
+                ], resize_keyboard=True
+            )
+        )
+        await state.set_state(AddEditClient.edit_subs_total)
+        return
+    if field == "games":
+        await callback.message.answer(
+            "Введи список игр (каждая с новой строки):",
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+        )
+        await state.set_state(AddEditClient.edit_games)
+        return
 
 @dp.message(AddEditClient.edit_games)
 async def edit_games_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    if message.text == "/done":
+    games = [line.strip() for line in message.text.strip().split("\n") if line.strip()]
+    data = await state.get_data()
+    cid = data.get("edit_id")
+    clients = load_db()
+    for i, c in enumerate(clients):
+        if c["id"] == cid:
+            c["games"] = games
+            clients[i] = c
+            save_db(clients)
+            await state.clear()
+            await clear_chat(message)
+            text, photo_id = format_card(c, show_photo_id=True)
+            if photo_id:
+                await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(c))
+            else:
+                await message.answer(text, reply_markup=edit_keyboard(c))
+            return
+
+@dp.message(AddEditClient.edit_reserve, ContentTypeFilter(content_types=[types.ContentType.PHOTO]))
+async def edit_reserve_photo(message: types.Message, state: FSMContext):
+    if not message.photo:
+        await message.answer("Отправьте фото!")
+        return
+    data = await state.get_data()
+    cid = data.get("edit_id")
+    photo_id = message.photo[-1].file_id
+    clients = load_db()
+    for i, c in enumerate(clients):
+        if c["id"] == cid:
+            c["reserve_photo_id"] = photo_id
+            clients[i] = c
+            save_db(clients)
+            await state.clear()
+            await clear_chat(message)
+            text, _ = format_card(c, show_photo_id=True)
+            await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(c))
+            return
+
+@dp.message(AddEditClient.edit_input)
+async def edit_input_handler(message: types.Message, state: FSMContext):
+    # Используется для редактирования contact, birth_date, account, console, region
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await clear_chat(message)
+        await start_cmd(message, state)
+        return
+    data = await state.get_data()
+    cid = data.get("edit_id")
+    field = data.get("edit_field")
+    clients = load_db()
+    for i, c in enumerate(clients):
+        if c["id"] == cid:
+            if field == "contact":
+                c["contact"] = message.text.strip()
+            elif field == "birth_date":
+                c["birth_date"] = message.text.strip()
+            elif field == "account":
+                rows = message.text.strip().split("\n")
+                login = rows[0].strip() if len(rows) > 0 else ""
+                password = rows[1].strip() if len(rows) > 1 else ""
+                mail_pass = rows[2].strip() if len(rows) > 2 else ""
+                c["account"] = {"login": login, "password": password, "mail_pass": mail_pass}
+            elif field == "console":
+                c["console"] = message.text.strip()
+            elif field == "region":
+                c["region"] = message.text.strip()
+            clients[i] = c
+            save_db(clients)
+            await state.clear()
+            await clear_chat(message)
+            text, photo_id = format_card(c, show_photo_id=True)
+            if photo_id:
+                await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(c))
+            else:
+                await message.answer(text, reply_markup=edit_keyboard(c))
+            return
+    await message.answer("Ошибка при обновлении.")
+    await state.clear()
+
+@dp.message(AddEditClient.edit_subs_total)
+async def edit_subs_total_handler(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await clear_chat(message)
+        await start_cmd(message, state)
+        return
+    if message.text == "Нет подписки":
         data = await state.get_data()
-        client = data.get("edit_client")
-        games = data.get("edit_games", [])
-        client["games"] = games
-        await update_client(client)
-        await message.answer("Игры обновлены.")
-        await clear_chat(message)
-        text, photo_id = format_card(client, show_photo_id=True)
-        kb = edit_keyboard(client)
-        await message.answer(text, reply_markup=kb)
-        if photo_id:
-            await message.answer_photo(photo=photo_id)
-        await state.update_data(edit_client=client)
-        await state.set_state(AddEditClient.edit_choose)
+        cid = data.get("edit_id")
+        clients = load_db()
+        for i, c in enumerate(clients):
+            if c["id"] == cid:
+                c["subscriptions"] = [{"name": "отсутствует"}]
+                clients[i] = c
+                save_db(clients)
+                await state.clear()
+                await clear_chat(message)
+                text, photo_id = format_card(c, show_photo_id=True)
+                if photo_id:
+                    await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(c))
+                else:
+                    await message.answer(text, reply_markup=edit_keyboard(c))
+                return
+        await message.answer("Ошибка при обновлении.")
+        await state.clear()
         return
-    data = await state.get_data()
-    games = data.get("edit_games", [])
-    games.append(message.text.strip())
-    await state.update_data(edit_games=games)
-    await message.answer(f"Добавлено: {message.text.strip()}\nПродолжайте или отправьте /done")
-
-@dp.message(AddEditClient.edit_reserve, content_types=types.ContentType.PHOTO)
-async def edit_reserve_photo_handler(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    client = data.get("edit_client")
-    photo = message.photo[-1]
-    client["reserve_photo_id"] = photo.file_id
-    await update_client(client)
-    await message.answer("Фото резерв-кодов обновлено.")
-    await clear_chat(message)
-    text, photo_id = format_card(client, show_photo_id=True)
-    kb = edit_keyboard(client)
-    await message.answer(text, reply_markup=kb)
-    if photo_id:
-        await message.answer_photo(photo=photo_id)
-    await state.update_data(edit_client=client)
-    await state.set_state(AddEditClient.edit_choose)
-
-@dp.message(AddEditClient.edit_reserve)
-async def edit_reserve_nonphoto_handler(message: types.Message):
-    await message.answer("Пожалуйста, загрузите фото.")
-
-@dp.message(AddEditClient.edit_subs_master)
-async def edit_subs_master_handler(message: types.Message, state: FSMContext):
-    if message.text == "0" or message.text == "❌ Отмена":
-        await clear_chat(message)
-        await start_cmd(message, state)
-        return
-    if message.text not in ("1", "2"):
-        await message.answer("Введите 1 или 2 для выбора подписки, или 0 для отмены.")
-        return
-    sub_num = int(message.text)
-    if sub_num == 1:
-        await message.answer("Выберите тип первой подписки:",
-                             reply_markup=ReplyKeyboardMarkup(
-                                 keyboard=[
-                                     [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
-                                     [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
-                                     [KeyboardButton(text="Нет подписки")],
-                                     [KeyboardButton(text="❌ Отмена")]
-                                 ], resize_keyboard=True))
+    if message.text == "Одна":
+        await message.answer("Выберите подписку (Одна):", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
+                [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
+                [KeyboardButton(text="❌ Отмена")]
+            ], resize_keyboard=True))
         await state.set_state(AddEditClient.edit_sub_1_type)
-    else:
-        await message.answer("Выберите тип второй подписки:",
-                             reply_markup=ReplyKeyboardMarkup(
-                                 keyboard=[
-                                     [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
-                                     [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
-                                     [KeyboardButton(text="Нет подписки")],
-                                     [KeyboardButton(text="❌ Отмена")]
-                                 ], resize_keyboard=True))
-        await state.set_state(AddEditClient.edit_sub_2_type)
+        return
+    if message.text == "Две":
+        await message.answer("Выберите первую подписку:", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
+                [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
+                [KeyboardButton(text="❌ Отмена")]
+            ], resize_keyboard=True))
+        await state.set_state(AddEditClient.edit_sub_1_type)
+        return
+    await message.answer("Нажмите кнопку!")
 
 @dp.message(AddEditClient.edit_sub_1_type)
-async def edit_sub_1_type(message: types.Message, state: FSMContext):
+async def edit_sub_1_type_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    valid = ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play", "Нет подписки"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
+    if message.text not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play"):
+        await message.answer("Выберите подписку кнопкой!")
         return
     await state.update_data(edit_sub_1_type=message.text)
-    if message.text in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
-    elif message.text == "EA Play":
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
+    kb = None
+    if message.text == "EA Play":
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     else:
-        # Нет подписки
-        await save_edited_subs(message, state)
-        return
-    await message.answer("Выберите срок первой подписки:", reply_markup=kb)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    await message.answer("Выберите срок:", reply_markup=kb)
     await state.set_state(AddEditClient.edit_sub_1_duration)
 
 @dp.message(AddEditClient.edit_sub_1_duration)
-async def edit_sub_1_duration(message: types.Message, state: FSMContext):
+async def edit_sub_1_duration_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
     data = await state.get_data()
-    sub_type = data.get("edit_sub_1_type")
-    valid = []
-    if sub_type in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
-        valid = ["1м", "3м", "12м"]
-    elif sub_type == "EA Play":
-        valid = ["1м", "12м"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
+    sub_1_type = data.get("edit_sub_1_type")
+    if (sub_1_type == "EA Play" and message.text not in ("1м", "12м")) or \
+       (sub_1_type != "EA Play" and message.text not in ("1м", "3м", "12м")):
+        await message.answer("Выберите срок кнопкой!")
         return
     await state.update_data(edit_sub_1_duration=message.text)
-    await message.answer("Введите дату оформления первой подписки (дд.мм.гггг):",
-                         reply_markup=ReplyKeyboardMarkup(
-                             keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
+    await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.edit_sub_1_start)
 
 @dp.message(AddEditClient.edit_sub_1_start)
-async def edit_sub_1_start(message: types.Message, state: FSMContext):
+async def edit_sub_1_start_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
@@ -1032,63 +1040,68 @@ async def edit_sub_1_start(message: types.Message, state: FSMContext):
         await message.answer("Формат даты: дд.мм.гггг")
         return
     await state.update_data(edit_sub_1_start=message.text.strip())
-    # Переходим к сохранению изменений первой подписки
-    await save_edited_subs(message, state)
+    data = await state.get_data()
+    subs_total = data.get("subs_total", 1)
+    if subs_total == 2:
+        await message.answer("Выберите вторую подписку:", reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
+                [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
+                [KeyboardButton(text="❌ Отмена")]
+            ], resize_keyboard=True))
+        await state.set_state(AddEditClient.edit_sub_2_type)
+    else:
+        # Формируем и сохраняем подписку
+        await save_edit_subscriptions(message, state)
 
 @dp.message(AddEditClient.edit_sub_2_type)
-async def edit_sub_2_type(message: types.Message, state: FSMContext):
+async def edit_sub_2_type_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
-        await clear_chat(message)
-        await start_cmd(message, state)
-        return
-    valid = ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential", "EA Play", "Нет подписки"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
-        return
-    await state.update_data(edit_sub_2_type=message.text)
-    if message.text in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
-    elif message.text == "EA Play":
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="1м"), KeyboardButton(text="12м")],
-                [KeyboardButton(text="❌ Отмена")]
-            ], resize_keyboard=True)
-    else:
-        await save_edited_subs(message, state)
-        return
-    await message.answer("Выберите срок второй подписки:", reply_markup=kb)
-    await state.set_state(AddEditClient.edit_sub_2_duration)
-
-@dp.message(AddEditClient.edit_sub_2_duration)
-async def edit_sub_2_duration(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
     data = await state.get_data()
-    sub_type = data.get("edit_sub_2_type")
-    valid = []
-    if sub_type in ["PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"]:
-        valid = ["1м", "3м", "12м"]
-    elif sub_type == "EA Play":
-        valid = ["1м", "12м"]
-    if message.text not in valid:
-        await message.answer("Нажмите кнопку!")
+    sub_1_type = data.get("edit_sub_1_type")
+    if sub_1_type == "EA Play":
+        if message.text not in ("PS Plus Deluxe", "PS Plus Extra", "PS Plus Essential"):
+            await message.answer("Выберите PS Plus!")
+            return
+    else:
+        if message.text != "EA Play":
+            await message.answer("Выберите EA Play!")
+            return
+    await state.update_data(edit_sub_2_type=message.text)
+    kb = None
+    if message.text == "EA Play":
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    else:
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    await message.answer("Выберите срок:", reply_markup=kb)
+    await state.set_state(AddEditClient.edit_sub_2_duration)
+
+@dp.message(AddEditClient.edit_sub_2_duration)
+async def edit_sub_2_duration_handler(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await clear_chat(message)
+        await start_cmd(message, state)
+        return
+    data = await state.get_data()
+    sub_2_type = data.get("edit_sub_2_type")
+    if (sub_2_type == "EA Play" and message.text not in ("1м", "12м")) or \
+       (sub_2_type != "EA Play" and message.text not in ("1м", "3м", "12м")):
+        await message.answer("Выберите срок кнопкой!")
         return
     await state.update_data(edit_sub_2_duration=message.text)
-    await message.answer("Введите дату оформления второй подписки (дд.мм.гггг):",
-                         reply_markup=ReplyKeyboardMarkup(
-                             keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
+    await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.edit_sub_2_start)
 
 @dp.message(AddEditClient.edit_sub_2_start)
-async def edit_sub_2_start(message: types.Message, state: FSMContext):
+async def edit_sub_2_start_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
@@ -1098,237 +1111,245 @@ async def edit_sub_2_start(message: types.Message, state: FSMContext):
         await message.answer("Формат даты: дд.мм.гггг")
         return
     await state.update_data(edit_sub_2_start=message.text.strip())
-    await save_edited_subs(message, state)
+    await save_edit_subscriptions(message, state)
 
-async def save_edited_subs(message, state: FSMContext):
+async def save_edit_subscriptions(message, state):
     data = await state.get_data()
-    client = data.get("edit_client")
-    subs = []
-    # Подписка 1
-    sub_1_type = data.get("edit_sub_1_type")
-    if not sub_1_type or sub_1_type == "Нет подписки":
-        # если нет первой подписки, то сразу проверить вторую
-        pass
-    else:
-        sub_1_duration = data.get("edit_sub_1_duration", "1м")
-        sub_1_start = data.get("edit_sub_1_start", datetime.now().strftime("%d.%m.%Y"))
-        start_dt = datetime.strptime(sub_1_start, "%d.%m.%Y")
-        months = int(sub_1_duration.replace("м", ""))
-        end_dt = start_dt + timedelta(days=30 * months)
-        subs.append({
-            "name": sub_1_type,
-            "duration": sub_1_duration,
-            "start": sub_1_start,
-            "end": end_dt.strftime("%d.%m.%Y")
-        })
-    # Подписка 2
-    sub_2_type = data.get("edit_sub_2_type")
-    if sub_2_type and sub_2_type != "Нет подписки":
-        sub_2_duration = data.get("edit_sub_2_duration", "1м")
-        sub_2_start = data.get("edit_sub_2_start", datetime.now().strftime("%d.%m.%Y"))
-        start_dt = datetime.strptime(sub_2_start, "%d.%m.%Y")
-        months = int(sub_2_duration.replace("м", ""))
-        end_dt = start_dt + timedelta(days=30 * months)
-        subs.append({
-            "name": sub_2_type,
-            "duration": sub_2_duration,
-            "start": sub_2_start,
-            "end": end_dt.strftime("%d.%m.%Y")
-        })
-    if not subs:
-        subs = [{"name": "отсутствует"}]
-    client["subscriptions"] = subs
-    await update_client(client)
-    await message.answer("Подписки обновлены.")
-    await clear_chat(message)
-    text, photo_id = format_card(client, show_photo_id=True)
-    kb = edit_keyboard(client)
-    await message.answer(text, reply_markup=kb)
-    if photo_id:
-        await message.answer_photo(photo=photo_id)
-    await state.update_data(edit_client=client)
-    await state.set_state(AddEditClient.edit_choose)
+    cid = data.get("edit_id")
+    clients = load_db()
+    for i, c in enumerate(clients):
+        if c["id"] == cid:
+            subs_total = data.get("subs_total", 1)
+            if subs_total == 1:
+                sub = {
+                    "name": data.get("edit_sub_1_type"),
+                    "duration": data.get("edit_sub_1_duration"),
+                    "start": data.get("edit_sub_1_start"),
+                    "end": calc_end_date(data.get("edit_sub_1_start"), data.get("edit_sub_1_duration"))
+                }
+                c["subscriptions"] = [sub]
+            elif subs_total == 2:
+                sub1 = {
+                    "name": data.get("edit_sub_1_type"),
+                    "duration": data.get("edit_sub_1_duration"),
+                    "start": data.get("edit_sub_1_start"),
+                    "end": calc_end_date(data.get("edit_sub_1_start"), data.get("edit_sub_1_duration"))
+                }
+                sub2 = {
+                    "name": data.get("edit_sub_2_type"),
+                    "duration": data.get("edit_sub_2_duration"),
+                    "start": data.get("edit_sub_2_start"),
+                    "end": calc_end_date(data.get("edit_sub_2_start"), data.get("edit_sub_2_duration"))
+                }
+                c["subscriptions"] = [sub1, sub2]
+            clients[i] = c
+            save_db(clients)
+            await state.clear()
+            await clear_chat(message)
+            text, photo_id = format_card(c, show_photo_id=True)
+            if photo_id:
+                await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(c))
+            else:
+                await message.answer(text, reply_markup=edit_keyboard(c))
+            return
+
+def calc_end_date(start_str, duration_str):
+    try:
+        start = datetime.strptime(start_str, "%d.%m.%Y")
+        months = int(duration_str.replace("м", ""))
+        year = start.year + (start.month - 1 + months) // 12
+        month = (start.month - 1 + months) % 12 + 1
+        day = start.day
+        end = start.replace(year=year, month=month, day=day)
+        return end.strftime("%d.%m.%Y")
+    except:
+        return start_str
 
 # --- БАЗА ---
-@dp.message(F.text == "📦 База")
-async def base_menu_handler(message: types.Message, state: FSMContext):
-    await clear_chat(message)
-    await message.answer("Меню базы данных:", reply_markup=base_menu())
 
-@dp.message()
-async def base_menu_actions(message: types.Message, state: FSMContext):
-    text = message.text
-    if text == "❌ Отмена":
+@dp.message(F.text == "📦 База")
+async def base_start(message: types.Message, state: FSMContext):
+    await state.clear()
+    await clear_chat(message)
+    await message.answer("Раздел База:", reply_markup=base_menu())
+
+@dp.message(F.text == "❌ Отмена")
+async def cancel_any(message: types.Message, state: FSMContext):
+    await state.clear()
+    await clear_chat(message)
+    await start_cmd(message, state)
+
+@dp.message(F.text == "📩 Выгрузить всю базу в чат")
+async def base_export(message: types.Message, state: FSMContext):
+    clients = load_db()
+    if not clients:
+        await message.answer("База пуста.")
+        return
+    text = ""
+    for c in clients:
+        c_text, _ = format_card(c)
+        text += c_text + "\n\n"
+    if len(text) > 4096:
+        # Отправлять кусками
+        for i in range(0, len(text), 4000):
+            await message.answer(text[i:i+4000])
+    else:
+        await message.answer(text)
+
+@dp.message(F.text == "🔄 Заканчивается подписка (7д)")
+async def base_subs_soon(message: types.Message, state: FSMContext):
+    clients = load_db()
+    soon = []
+    now = datetime.now()
+    limit = now + timedelta(days=7)
+    for c in clients:
+        for sub in c.get("subscriptions", []):
+            try:
+                end_date = datetime.strptime(sub.get("end", ""), "%d.%m.%Y")
+                if now <= end_date <= limit:
+                    soon.append(c)
+                    break
+            except:
+                continue
+    if not soon:
+        await message.answer("Подписки не заканчиваются в ближайшие 7 дней.")
+        return
+    text = ""
+    for c in soon:
+        c_text, _ = format_card(c)
+        text += c_text + "\n\n"
+    await message.answer(text)
+
+@dp.message(F.text == "🎉 Скоро ДР (7д)")
+async def base_birthday_soon(message: types.Message, state: FSMContext):
+    clients = load_db()
+    soon = []
+    now = datetime.now()
+    limit = now + timedelta(days=7)
+    for c in clients:
+        bd_str = c.get("birth_date", "отсутствует")
+        if bd_str == "отсутствует":
+            continue
+        try:
+            bd = datetime.strptime(bd_str, "%d.%m.%Y")
+            this_year_bd = bd.replace(year=now.year)
+            if now <= this_year_bd <= limit:
+                soon.append(c)
+        except:
+            continue
+    if not soon:
+        await message.answer("В ближайшие 7 дней дней рождения нет.")
+        return
+    text = ""
+    for c in soon:
+        c_text, _ = format_card(c)
+        text += c_text + "\n\n"
+    await message.answer(text)
+
+@dp.message(F.text == "⚠️ Без подписки")
+async def base_no_sub(message: types.Message, state: FSMContext):
+    clients = load_db()
+    no_subs = []
+    for c in clients:
+        subs = c.get("subscriptions", [])
+        if not subs or (len(subs) == 1 and subs[0].get("name") == "отсутствует"):
+            no_subs.append(c)
+    if not no_subs:
+        await message.answer("Все клиенты имеют подписки.")
+        return
+    text = ""
+    for c in no_subs:
+        c_text, _ = format_card(c)
+        text += c_text + "\n\n"
+    await message.answer(text)
+
+@dp.message(F.text == "⏯️ Сделать бэкап базы")
+async def base_backup(message: types.Message, state: FSMContext):
+    if not os.path.exists(DB_FILE):
+        await message.answer("База пуста, нечего бэкапить.")
+        return
+    backup_file = DB_FILE + ".bak"
+    shutil.copyfile(DB_FILE, backup_file)
+    await message.answer("Бэкап базы создан.")
+    await start_cmd(message, state)
+
+@dp.message(F.text == "▶️ Восстановить из бэкапа")
+async def base_restore(message: types.Message, state: FSMContext):
+    backup_file = DB_FILE + ".bak"
+    if not os.path.exists(backup_file):
+        await message.answer("Бэкап не найден.")
+        return
+    shutil.copyfile(backup_file, DB_FILE)
+    await message.answer("База восстановлена из бэкапа.")
+    await start_cmd(message, state)
+
+@dp.message(F.text == "🗑️ Очистить базу")
+async def base_clear_ask(message: types.Message, state: FSMContext):
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Да"), KeyboardButton(text="Нет")]
+        ], resize_keyboard=True)
+    await message.answer("Вы уверены, что хотите очистить базу?", reply_markup=keyboard)
+    await state.set_state(AddEditClient.awaiting_confirm_clear)
+
+@dp.message(AddEditClient.awaiting_confirm_clear)
+async def base_clear_confirm(message: types.Message, state: FSMContext):
+    if message.text == "Да":
+        if os.path.exists(DB_FILE):
+            os.remove(DB_FILE)
+        await message.answer("База очищена.")
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    if text == "📩 Выгрузить всю базу в чат":
-        clients = load_db()
-        if not clients:
-            await message.answer("База пуста.")
-            return
-        txt = ""
-        for c in clients:
-            card, _ = format_card(c)
-            txt += card + "\n\n"
-        for chunk in [txt[i:i + 4000] for i in range(0, len(txt), 4000)]:
-            await message.answer(chunk)
-        return
-    if text == "🔄 Заканчивается подписка (7д)":
-        clients = load_db()
-        soon = []
-        now = datetime.now()
-        for c in clients:
-            for sub in c.get("subscriptions", []):
-                if sub.get("name") == "отсутствует":
-                    continue
-                try:
-                    end_dt = datetime.strptime(sub.get("end"), "%d.%m.%Y")
-                    if 0 <= (end_dt - now).days <= 7:
-                        soon.append(c)
-                        break
-                except:
-                    continue
-        if not soon:
-            await message.answer("Нет подписок, заканчивающихся в ближайшие 7 дней.")
-            return
-        txt = "Подписки заканчиваются в ближайшие 7 дней:\n\n"
-        for c in soon:
-            card, _ = format_card(c)
-            txt += card + "\n\n"
-        for chunk in [txt[i:i + 4000] for i in range(0, len(txt), 4000)]:
-            await message.answer(chunk)
-        return
-    if text == "🎉 Скоро ДР (7д)":
-        clients = load_db()
-        soon_bd = []
-        now = datetime.now()
-        for c in clients:
-            bd = c.get("birth_date")
-            if not bd or bd == "отсутствует":
-                continue
-            try:
-                bd_dt = datetime.strptime(bd, "%d.%m.%Y")
-                bd_this_year = bd_dt.replace(year=now.year)
-                days_to_bd = (bd_this_year - now).days
-                if 0 <= days_to_bd <= 7:
-                    soon_bd.append(c)
-            except:
-                continue
-        if not soon_bd:
-            await message.answer("Нет клиентов с днём рождения в ближайшие 7 дней.")
-            return
-        txt = "Дни рождения в ближайшие 7 дней:\n\n"
-        for c in soon_bd:
-            card, _ = format_card(c)
-            txt += card + "\n\n"
-        for chunk in [txt[i:i + 4000] for i in range(0, len(txt), 4000)]:
-            await message.answer(chunk)
-        return
-    if text == "⚠️ Без подписки":
-        clients = load_db()
-        no_subs = [c for c in clients if c.get("subscriptions", [{}])[0].get("name") == "отсутствует"]
-        if not no_subs:
-            await message.answer("Все клиенты с подписками.")
-            return
-        txt = "Клиенты без подписки:\n\n"
-        for c in no_subs:
-            card, _ = format_card(c)
-            txt += card + "\n\n"
-        for chunk in [txt[i:i + 4000] for i in range(0, len(txt), 4000)]:
-            await message.answer(chunk)
-        return
-    if text == "⏯️ Сделать бэкап базы":
-        try:
-            if os.path.exists(DB_FILE):
-                shutil.copyfile(DB_FILE, DB_FILE + ".bak")
-                await message.answer("Бэкап базы создан.")
-            else:
-                await message.answer("База пуста, бэкап не создан.")
-        except Exception as e:
-            await message.answer(f"Ошибка при создании бэкапа: {str(e)}")
+    elif message.text == "Нет":
+        await message.answer("Отмена очистки базы.")
+        await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
         return
-    if text == "▶️ Восстановить из бэкапа":
-        try:
-            if os.path.exists(DB_FILE + ".bak"):
-                shutil.copyfile(DB_FILE + ".bak", DB_FILE)
-                await message.answer("База восстановлена из бэкапа.")
-            else:
-                await message.answer("Бэкап не найден.")
-        except Exception as e:
-            await message.answer(f"Ошибка при восстановлении бэкапа: {str(e)}")
-        await clear_chat(message)
-        await start_cmd(message, state)
-        return
-    if text == "🗑️ Очистить базу":
-        kb = ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="Да"), KeyboardButton(text="Нет")]
-        ], resize_keyboard=True)
-        await message.answer("Вы уверены, что хотите очистить базу? Все данные будут удалены!", reply_markup=kb)
-        await state.set_state(AddEditClient.awaiting_confirm_clear)
-        return
-    if state.current_state().state == AddEditClient.awaiting_confirm_clear.state:
-        if text == "Да":
-            try:
-                if os.path.exists(DB_FILE):
-                    os.remove(DB_FILE)
-                await message.answer("База очищена.")
-            except Exception as e:
-                await message.answer(f"Ошибка при очистке базы: {str(e)}")
-            await clear_chat(message)
-            await start_cmd(message, state)
-            return
-        else:
-            await clear_chat(message)
-            await start_cmd(message, state)
-            return
-    await message.answer("Нажмите кнопку из меню!")
+    else:
+        await message.answer("Пожалуйста, выберите Да или Нет.")
 
 @dp.message(F.text == "📊 Статистика")
-async def stats_handler(message: types.Message):
+async def show_stats(message: types.Message, state: FSMContext):
     clients = load_db()
     n_clients = len(clients)
-    n_no_subs = 0
-    n_with_subs = 0
+    n_no_subs = sum(1 for c in clients if not c.get("subscriptions") or (len(c.get("subscriptions")) == 1 and c.get("subscriptions")[0].get("name") == "отсутствует"))
+    n_with_subs = n_clients - n_no_subs
     subs_types = {}
     two_subs = 0
-    region_map = {"(укр)":0, "(тур)":0, "(польша)":0, "(британия)":0, "(другой)":0}
+    region_map = {"укр":0, "тур":0, "(польша)":0, "(британия)":0, "другой":0}
     n_games = 0
     soon_subs = 0
     soon_bd = 0
     now = datetime.now()
+    limit = now + timedelta(days=7)
     for c in clients:
-        subs = c.get("subscriptions", [{"name":"отсутствует"}])
-        if len(subs) > 1:
-            two_subs += 1
-        if subs[0].get("name") == "отсутствует":
-            n_no_subs += 1
-        else:
-            n_with_subs += 1
-            for sub in subs:
-                subs_types[sub.get("name", "неизвестно")] = subs_types.get(sub.get("name", "неизвестно"), 0) + 1
-                try:
-                    end_dt = datetime.strptime(sub.get("end"), "%d.%m.%Y")
-                    if 0 <= (end_dt - now).days <= 7:
-                        soon_subs += 1
-                except:
-                    pass
-        reg = c.get("region", "(другой)")
-        if reg not in region_map:
-            reg = "(другой)"
-        region_map[reg] += 1
-        if c.get("games"):
-            n_games += 1
-        bd = c.get("birth_date")
-        if bd and bd != "отсутствует":
+        subs = c.get("subscriptions", [])
+        if len(subs) == 2:
+            two_subs +=1
+        for sub in subs:
+            name = sub.get("name", "отсутствует")
+            subs_types[name] = subs_types.get(name, 0) + 1
             try:
-                bd_dt = datetime.strptime(bd, "%d.%m.%Y")
-                bd_this_year = bd_dt.replace(year=now.year)
-                if 0 <= (bd_this_year - now).days <= 7:
-                    soon_bd += 1
+                end_date = datetime.strptime(sub.get("end", ""), "%d.%m.%Y")
+                if now <= end_date <= limit:
+                    soon_subs += 1
+            except:
+                pass
+        reg = c.get("region", "").strip("()")
+        if reg in region_map:
+            region_map[reg] += 1
+        games = c.get("games", [])
+        n_games += len(games)
+        bd_str = c.get("birth_date", "отсутствует")
+        if bd_str != "отсутствует":
+            try:
+                bd = datetime.strptime(bd_str, "%d.%m.%Y")
+                this_year_bd = bd.replace(year=now.year)
+                if now <= this_year_bd <= limit:
+                    soon_bd +=1
             except:
                 pass
     txt = f"<b>Статистика CRM</b>\n\n"
@@ -1339,16 +1360,19 @@ async def stats_handler(message: types.Message):
         txt += f"— {k}: {v}\n"
     txt += f"🔁 Две подписки: {two_subs}\n\n"
     txt += f"🌍 Регионы:\n"
-    for reg in ["(укр)", "(тур)", "(польша)", "(британия)", "(другой)"]:
+    for reg in ["укр", "тур", "(польша)", "(британия)", "другой"]:
         txt += f"{reg}: {region_map[reg]}\n"
     txt += f"\n🎮 Оформлено игр: {n_games}\n"
     txt += f"⏳ Подписки истекают (7 дней): {soon_subs}\n"
     txt += f"🎂 День рождения скоро: {soon_bd}\n"
     await message.answer(txt)
 
-async def main():
+# --- Запуск бота и планировщика ---
+
+async def on_startup():
     scheduler.start()
-    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    dp.run_polling(bot, on_startup=on_startup)
