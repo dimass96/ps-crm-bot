@@ -2,8 +2,8 @@ import os
 import json
 from cryptography.fernet import Fernet
 
-DB_FILE = "clients_db.json"
-KEY_FILE = "secret.key"
+DB_FILE = "/data/clients_db.json"
+KEY_FILE = "/data/secret.key"
 
 def generate_key():
     if not os.path.exists(KEY_FILE):
