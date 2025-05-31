@@ -939,14 +939,19 @@ async def save_client_changes(callback: types.CallbackQuery, state: FSMContext):
 def base_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📩 Выгрузить всю базу в чат")],
-            [KeyboardButton(text="🔄 Заканчивается подписка (7д)")],
-            [KeyboardButton(text="🎉 Скоро ДР (7д)")],
-            [KeyboardButton(text="⚠️ Без подписки")],
-            [KeyboardButton(text="⏯️ Сделать бэкап базы")],
-            [KeyboardButton(text="▶️ Восстановить из бэкапа")],
-            [KeyboardButton(text="🗑️ Очистить базу")],
-            [KeyboardButton(text="❌ Назад")]
+            [
+                KeyboardButton(text="🔄 Заканчивается подписка (7д)"),
+                KeyboardButton(text="🎉 Скоро ДР (7д)"),
+                KeyboardButton(text="⚠️ Без подписки"),
+            ],
+            [
+                KeyboardButton(text="⏯️ Сделать бэкап базы"),
+                KeyboardButton(text="▶️ Восстановить из бэкапа"),
+                KeyboardButton(text="🗑️ Очистить базу"),
+            ],
+            [
+                KeyboardButton(text="❌ Назад"),
+            ],
         ], resize_keyboard=True
     )
 
