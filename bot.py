@@ -6,7 +6,7 @@ import glob
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import CommandStart
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
@@ -115,7 +115,7 @@ def delete_client(client_id):
 class AddEditClient(StatesGroup):
     contact = State()
     birthdate_yesno = State()
-    birth_date = State()
+    birthdate = State()
     account = State()
     region = State()
     console = State()
@@ -267,10 +267,10 @@ async def clear_chat(message: types.Message):
 
 bot = Bot(
     token=API_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    session=AiohttpSession(),
+    parse_mode=ParseMode.HTML
 )
 dp = Dispatcher()
-
 scheduler = AsyncIOScheduler()
 
 @dp.message(CommandStart())
@@ -323,11 +323,11 @@ async def step_birthdate_ask(message: types.Message, state: FSMContext):
         await message.answer("Введите дату рождения (дд.мм.гггг):",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="Отсутствует")],[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
-        await state.set_state(AddEditClient.birth_date)
+        await state.set_state(AddEditClient.birthdate)
         return
     await message.answer("Нажмите кнопку!")
 
-@dp.message(AddEditClient.birth_date)
+@dp.message(AddEditClient.birthdate)
 async def step_birthdate(message: types.Message, state: FSMContext):
     if message.text == "Отсутствует":
         await state.update_data(birth_date="отсутствует")
@@ -1205,188 +1205,27 @@ async def edit_sub_2_start(message: types.Message, state: FSMContext):
             await state.clear()
             return
 
-# --- БАЗА ---
-@dp.message(F.text == "📦 База")
-async def base_start(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("Нет доступа.")
-        return
-    await state.clear()
-    await clear_chat(message)
-    await message.answer("Меню базы", reply_markup=base_menu())
-
-@dp.message(F.text == "❌ Назад")
-async def base_back(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("Нет доступа.")
-        return
-    await state.clear()
-    await clear_chat(message)
-    await start_cmd(message, state)
-
-@dp.message(F.text == "📩 Выгрузить всю базу в чат")
-async def base_dump(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("Нет доступа.")
-        return
+@dp.callback_query(F.data.startswith("save_"))
+async def save_client_callback(callback: types.CallbackQuery, state: FSMContext):
+    cid = int(callback.data.split("_")[1])
     clients = load_db()
-    if not clients:
-        await message.answer("База пуста.")
+    client = next((c for c in clients if c["id"] == cid), None)
+    if not client:
+        await callback.answer("Клиент не найден.")
         return
-    text = ""
-    for c in clients:
-        c_text, _ = format_card(c)
-        text += c_text + "\n\n"
-    if len(text) > 4000:
-        # Разбиваем на части по 4000 символов
-        parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
-        for p in parts:
-            await message.answer(p)
-    else:
-        await message.answer(text)
-
-@dp.message(F.text == "🔄 Заканчивается подписка (7д)")
-async def base_expiring(message: types.Message):
-    clients = load_db()
-    soon = []
-    now = datetime.now()
-    for c in clients:
-        subs = c.get("subscriptions", [])
-        for sub in subs:
-            if sub.get("name") != "отсутствует":
-                try:
-                    end_date = datetime.strptime(sub.get("end", ""), "%d.%m.%Y")
-                    if 0 <= (end_date - now).days <= 7:
-                        soon.append(c)
-                        break
-                except:
-                    continue
-    if not soon:
-        await message.answer("Нет подписок, заканчивающихся в ближайшие 7 дней.")
-        return
-    text = ""
-    for c in soon:
-        c_text, _ = format_card(c)
-        text += c_text + "\n\n"
-    await message.answer(text)
-
-@dp.message(F.text == "🎉 Скоро ДР (7д)")
-async def base_birthdays(message: types.Message):
-    clients = load_db()
-    soon = []
-    now = datetime.now()
-    for c in clients:
-        bd = c.get("birth_date", "отсутствует")
-        if bd == "отсутствует":
-            continue
-        try:
-            bdate = datetime.strptime(bd, "%d.%m.%Y")
-            this_year = bdate.replace(year=now.year)
-            diff = (this_year - now).days
-            if 0 <= diff <= 7:
-                soon.append(c)
-        except:
-            continue
-    if not soon:
-        await message.answer("Нет клиентов с днём рождения в ближайшие 7 дней.")
-        return
-    text = ""
-    for c in soon:
-        c_text, _ = format_card(c)
-        text += c_text + "\n\n"
-    await message.answer(text)
-
-@dp.message(F.text == "⚠️ Без подписки")
-async def base_without_sub(message: types.Message):
-    clients = load_db()
-    nosub = [c for c in clients if not c.get("subscriptions") or (len(c.get("subscriptions", [])) == 1 and c.get("subscriptions")[0].get("name") == "отсутствует")]
-    if not nosub:
-        await message.answer("Все клиенты с подпиской.")
-        return
-    text = ""
-    for c in nosub:
-        c_text, _ = format_card(c)
-        text += c_text + "\n\n"
-    await message.answer(text)
-
-@dp.message(F.text == "⏯️ Сделать бэкап базы")
-async def base_backup(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("Нет доступа.")
-        return
-    if not os.path.exists(DB_FILE):
-        await message.answer("База пуста, бэкап не создан.")
-        return
-    os.makedirs("/data/backups", exist_ok=True)
-    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    backup_name = f"/data/backups/backup_{now_str}.json"
-    shutil.copyfile(DB_FILE, backup_name)
-    backups = sorted(glob.glob("/data/backups/backup_*.json"))
-    if len(backups) > 5:
-        os.remove(backups[0])
-    await message.answer(f"Бэкап базы создан: {os.path.basename(backup_name)}")
-
-@dp.message(F.text == "▶️ Восстановить из бэкапа")
-async def base_restore(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("Нет доступа.")
-        return
-    backups = sorted(glob.glob("/data/backups/backup_*.json"))
-    if not backups:
-        await message.answer("Бэкапов нет.")
-        return
-    kb = InlineKeyboardMarkup(row_width=1)
-    for b in backups[-5:]:
-        kb.add(InlineKeyboardButton(text=os.path.basename(b), callback_data=f"restore_{os.path.basename(b)}"))
-    await message.answer("Выберите бэкап для восстановления:", reply_markup=kb)
-    await state.set_state(AddEditClient.awaiting_backup_choice)
-
-@dp.callback_query(F.data.startswith("restore_"))
-async def process_restore(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("Нет доступа.")
         return
-    filename = callback.data[len("restore_"):]
-    path = f"/data/backups/{filename}"
-    if not os.path.exists(path):
-        await callback.answer("Файл бэкапа не найден.")
-        return
-    shutil.copyfile(path, DB_FILE)
-    await callback.answer("База восстановлена из бэкапа.")
-    await callback.message.edit_text("База восстановлена.")
-    await asyncio.sleep(2)
+    # Просто подтверждаем, что изменения сохранены, т.к. данные уже обновлены в базе при редактировании
+    await callback.answer("Изменения сохранены")
     await clear_chat(callback.message)
-    await start_cmd(callback.message, None)
-
-@dp.message(F.text == "🗑️ Очистить базу")
-async def base_clear(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("Нет доступа.")
-        return
-    await message.answer("Подтвердите очистку базы:", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Нет"), KeyboardButton(text="✅ Да")]], resize_keyboard=True))
-    await state.set_state(AddEditClient.awaiting_confirm_clear)
-
-@dp.message(AddEditClient.awaiting_confirm_clear)
-async def base_clear_confirm(message: types.Message, state: FSMContext):
-    if message.text == "❌ Нет":
-        await message.answer("Очистка отменена.")
-        await state.clear()
-        await start_cmd(message, state)
-        return
-    if message.text == "✅ Да":
-        if os.path.exists(DB_FILE):
-            os.remove(DB_FILE)
-        await message.answer("База очищена.")
-        await state.clear()
-        await start_cmd(message, state)
-        return
-    await message.answer("Нажмите кнопку!")
+    await start_cmd(callback.message, state)
 
 # Запуск
 async def on_startup():
     scheduler.start()
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(on_startup())
-    asyncio.run(dp.start_polling(bot))
+    asyncio.run(dp.start_polling())
