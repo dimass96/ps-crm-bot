@@ -115,7 +115,7 @@ def delete_client(client_id):
 class AddEditClient(StatesGroup):
     contact = State()
     birthdate_yesno = State()
-    birthdate = State()
+    birth_date = State()
     account = State()
     region = State()
     console = State()
@@ -158,7 +158,7 @@ def region_btns():
             [KeyboardButton(text="(польша)")],
             [KeyboardButton(text="(британия)")],
             [KeyboardButton(text="(другой)")],
-            [KeyboardButton(text="❌ Назад")]
+            [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True
     )
 
@@ -167,7 +167,7 @@ def console_btns():
         keyboard=[
             [KeyboardButton(text="PS4"), KeyboardButton(text="PS5")],
             [KeyboardButton(text="PS4/PS5")],
-            [KeyboardButton(text="❌ Назад")]
+            [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True
     )
 
@@ -242,6 +242,7 @@ def format_card(client, show_photo_id=False):
     else:
         lines.append(f"\n<b>Без подписки</b>")
     region = client.get("region", "—")
+    # В скобках для региона
     if region and not (region.startswith("(") and region.endswith(")")) and region != "—":
         region = f"({region})"
     lines.append(f"\n🌍 Регион: {region}")
@@ -268,7 +269,8 @@ bot = Bot(
     token=API_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-dp = Dispatcher(bot)
+dp = Dispatcher()
+
 scheduler = AsyncIOScheduler()
 
 @dp.message(CommandStart())
@@ -287,12 +289,12 @@ async def add_start(message: types.Message, state: FSMContext):
     await clear_chat(message)
     await message.answer("Введите номер телефона или Telegram (@username):", 
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+            keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.contact)
 
 @dp.message(AddEditClient.contact)
 async def step_contact(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -302,13 +304,13 @@ async def step_contact(message: types.Message, state: FSMContext):
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Да"), KeyboardButton(text="Отсутствует")],
-                [KeyboardButton(text="❌ Назад")]
+                [KeyboardButton(text="❌ Отмена")]
             ], resize_keyboard=True))
     await state.set_state(AddEditClient.birthdate_yesno)
 
 @dp.message(AddEditClient.birthdate_yesno)
 async def step_birthdate_ask(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -320,18 +322,18 @@ async def step_birthdate_ask(message: types.Message, state: FSMContext):
     if message.text == "Да":
         await message.answer("Введите дату рождения (дд.мм.гггг):",
             reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="Отсутствует")],[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
-        await state.set_state(AddEditClient.birthdate)
+                keyboard=[[KeyboardButton(text="Отсутствует")],[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
+        await state.set_state(AddEditClient.birth_date)
         return
     await message.answer("Нажмите кнопку!")
 
-@dp.message(AddEditClient.birthdate)
+@dp.message(AddEditClient.birth_date)
 async def step_birthdate(message: types.Message, state: FSMContext):
     if message.text == "Отсутствует":
         await state.update_data(birth_date="отсутствует")
         await ask_account(message, state)
         return
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -347,12 +349,12 @@ async def step_birthdate(message: types.Message, state: FSMContext):
 async def ask_account(message, state: FSMContext):
     await message.answer("Введи:\n1. Логин\n2. Пароль\n3. Почта-пароль (можно пропустить)\n\nКаждый пункт с новой строки.",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+            keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.account)
 
 @dp.message(AddEditClient.account)
 async def step_account(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -367,7 +369,7 @@ async def step_account(message: types.Message, state: FSMContext):
 
 @dp.message(AddEditClient.region)
 async def step_region(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -381,7 +383,7 @@ async def step_region(message: types.Message, state: FSMContext):
 
 @dp.message(AddEditClient.console)
 async def step_console(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -393,13 +395,13 @@ async def step_console(message: types.Message, state: FSMContext):
     await message.answer("Есть подписки?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
-            [KeyboardButton(text="❌ Назад")]
+            [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True))
     await state.set_state(AddEditClient.subscriptions_yesno)
 
 @dp.message(AddEditClient.subscriptions_yesno)
 async def step_subs_yesno(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -412,7 +414,7 @@ async def step_subs_yesno(message: types.Message, state: FSMContext):
         await message.answer("Сколько подписок?", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Одна"), KeyboardButton(text="Две")],
-                [KeyboardButton(text="❌ Назад")]
+                [KeyboardButton(text="❌ Отмена")]
             ], resize_keyboard=True))
         await state.set_state(AddEditClient.subscriptions_count)
         return
@@ -420,7 +422,7 @@ async def step_subs_yesno(message: types.Message, state: FSMContext):
 
 @dp.message(AddEditClient.subscriptions_count)
 async def step_subs_count(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -442,7 +444,7 @@ async def sub_select(message, state: FSMContext, sub_num=1, only_one=False):
                 [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
                 [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
                 [KeyboardButton(text="Нет подписки")],
-                [KeyboardButton(text="❌ Назад")]
+                [KeyboardButton(text="❌ Отмена")]
             ], resize_keyboard=True
         )
         await message.answer("Выберите тип подписки:", reply_markup=kb)
@@ -456,21 +458,21 @@ async def sub_select(message, state: FSMContext, sub_num=1, only_one=False):
                 keyboard=[
                     [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra"), KeyboardButton(text="PS Plus Essential")],
                     [KeyboardButton(text="Нет подписки")],
-                    [KeyboardButton(text="❌ Назад")]
+                    [KeyboardButton(text="❌ Отмена")]
                 ], resize_keyboard=True)
         else:
             kb = ReplyKeyboardMarkup(
                 keyboard=[
                     [KeyboardButton(text="EA Play")],
                     [KeyboardButton(text="Нет подписки")],
-                    [KeyboardButton(text="❌ Назад")]
+                    [KeyboardButton(text="❌ Отмена")]
                 ], resize_keyboard=True)
         await message.answer("Выберите вторую подписку:", reply_markup=kb)
         await state.set_state(AddEditClient.sub_2_type)
 
 @dp.message(AddEditClient.sub_1_type)
 async def sub1_type(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -485,15 +487,15 @@ async def sub1_type(message: types.Message, state: FSMContext):
     await state.update_data(sub_1_type=message.text)
     kb = None
     if message.text == "EA Play":
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     else:
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     await message.answer("Выберите срок:", reply_markup=kb)
     await state.set_state(AddEditClient.sub_1_duration)
 
 @dp.message(AddEditClient.sub_1_duration)
 async def sub1_duration(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -506,12 +508,12 @@ async def sub1_duration(message: types.Message, state: FSMContext):
         return
     await state.update_data(sub_1_duration=message.text)
     await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.sub_1_start)
 
 @dp.message(AddEditClient.sub_1_start)
 async def sub1_start(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -547,7 +549,7 @@ async def sub1_start(message: types.Message, state: FSMContext):
 
 @dp.message(AddEditClient.sub_2_type)
 async def sub2_type(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -570,15 +572,15 @@ async def sub2_type(message: types.Message, state: FSMContext):
     await state.update_data(sub_2_type=message.text)
     kb = None
     if message.text == "EA Play":
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     else:
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     await message.answer("Выберите срок:", reply_markup=kb)
     await state.set_state(AddEditClient.sub_2_duration)
 
 @dp.message(AddEditClient.sub_2_duration)
 async def sub2_duration(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -591,12 +593,12 @@ async def sub2_duration(message: types.Message, state: FSMContext):
         return
     await state.update_data(sub_2_duration=message.text)
     await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.sub_2_start)
 
 @dp.message(AddEditClient.sub_2_start)
 async def sub2_start(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -630,13 +632,13 @@ async def ask_games(message, state: FSMContext):
     await message.answer("Оформлены игры?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
-            [KeyboardButton(text="❌ Назад")]
+            [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True))
     await state.set_state(AddEditClient.games_yesno)
 
 @dp.message(AddEditClient.games_yesno)
 async def games_yesno(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -648,14 +650,14 @@ async def games_yesno(message: types.Message, state: FSMContext):
     if message.text == "Да":
         await message.answer("Введи список игр (каждая с новой строки):", 
             reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+                keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
         await state.set_state(AddEditClient.games_input)
         return
     await message.answer("Нажмите кнопку!")
 
 @dp.message(AddEditClient.games_input)
 async def games_input(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -668,13 +670,13 @@ async def ask_reserve(message, state: FSMContext):
     await message.answer("Есть ли резервные коды?", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
-            [KeyboardButton(text="❌ Назад")]
+            [KeyboardButton(text="❌ Отмена")]
         ], resize_keyboard=True))
     await state.set_state(AddEditClient.reserve_yesno)
 
 @dp.message(AddEditClient.reserve_yesno)
 async def reserve_yesno(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -685,14 +687,14 @@ async def reserve_yesno(message: types.Message, state: FSMContext):
         return
     if message.text == "Да":
         await message.answer("Загрузите скриншот (фото):", reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+            keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
         await state.set_state(AddEditClient.reserve_photo)
         return
     await message.answer("Нажмите кнопку!")
 
 @dp.message(AddEditClient.reserve_photo)
 async def reserve_photo(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -733,13 +735,13 @@ async def find_start(message: types.Message, state: FSMContext):
     await clear_chat(message)
     await message.answer(
         "Введите любой поисковый запрос (номер/TG, имя, регион, логин, игра и т.д.):",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     )
     await state.set_state(AddEditClient.edit_input)
 
 @dp.message(AddEditClient.edit_input)
 async def do_find(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -808,7 +810,7 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     if field == "contact":
         await callback.message.answer(
             "Введите новый номер телефона или Telegram:",
-            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
         )
         await state.set_state(AddEditClient.edit_input)
         await state.update_data(edit_field="contact")
@@ -816,7 +818,7 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     if field == "birth":
         await callback.message.answer(
             "Введите новую дату рождения (дд.мм.гггг) или 'отсутствует':",
-            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отсутствует")],[KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отсутствует")],[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
         )
         await state.set_state(AddEditClient.edit_input)
         await state.update_data(edit_field="birth_date")
@@ -824,7 +826,7 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     if field == "account":
         await callback.message.answer(
             "Введи:\n1. Логин\n2. Пароль\n3. Почта-пароль (можно пропустить)\n\nКаждый пункт с новой строки.",
-            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
         )
         await state.set_state(AddEditClient.edit_input)
         await state.update_data(edit_field="account")
@@ -842,7 +844,7 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     if field == "reserve":
         await callback.message.answer(
             "Загрузите новое фото резерв-кодов:",
-            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
         )
         await state.set_state(AddEditClient.edit_reserve)
         return
@@ -853,7 +855,7 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
                 keyboard=[
                     [KeyboardButton(text="Одна"), KeyboardButton(text="Две")],
                     [KeyboardButton(text="Нет подписки")],
-                    [KeyboardButton(text="❌ Назад")]
+                    [KeyboardButton(text="❌ Отмена")]
                 ], resize_keyboard=True
             )
         )
@@ -862,14 +864,14 @@ async def edit_fields(callback: types.CallbackQuery, state: FSMContext):
     if field == "games":
         await callback.message.answer(
             "Введи список игр (каждая с новой строки):",
-            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
         )
         await state.set_state(AddEditClient.edit_games)
         return
 
 @dp.message(AddEditClient.edit_games)
 async def edit_games_input(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -893,7 +895,7 @@ async def edit_games_input(message: types.Message, state: FSMContext):
 
 @dp.message(AddEditClient.edit_reserve)
 async def edit_reserve_photo(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -920,15 +922,16 @@ async def edit_reserve_photo(message: types.Message, state: FSMContext):
 
 @dp.message(AddEditClient.edit_input)
 async def edit_text_input(message: types.Message, state: FSMContext):
+    # Для обновления других полей, когда пришли в edit_input, но не в поиске
     data = await state.get_data()
     if not data.get("edit_field"):
-        await message.answer("Введите запрос для поиска клиента или нажмите ❌ Назад.")
+        await message.answer("Введите запрос для поиска клиента или нажмите ❌ Отмена.")
         return
     await do_find(message, state)
 
 @dp.message(AddEditClient.edit_subs_total)
 async def edit_subs_total(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -969,7 +972,7 @@ async def sub_edit_select(message, state: FSMContext, sub_num=1, only_one=False)
                 [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra")],
                 [KeyboardButton(text="PS Plus Essential"), KeyboardButton(text="EA Play")],
                 [KeyboardButton(text="Нет подписки")],
-                [KeyboardButton(text="❌ Назад")]
+                [KeyboardButton(text="❌ Отмена")]
             ], resize_keyboard=True
         )
         await message.answer("Выберите тип подписки:", reply_markup=kb)
@@ -983,21 +986,21 @@ async def sub_edit_select(message, state: FSMContext, sub_num=1, only_one=False)
                 keyboard=[
                     [KeyboardButton(text="PS Plus Deluxe"), KeyboardButton(text="PS Plus Extra"), KeyboardButton(text="PS Plus Essential")],
                     [KeyboardButton(text="Нет подписки")],
-                    [KeyboardButton(text="❌ Назад")]
+                    [KeyboardButton(text="❌ Отмена")]
                 ], resize_keyboard=True)
         else:
             kb = ReplyKeyboardMarkup(
                 keyboard=[
                     [KeyboardButton(text="EA Play")],
                     [KeyboardButton(text="Нет подписки")],
-                    [KeyboardButton(text="❌ Назад")]
+                    [KeyboardButton(text="❌ Отмена")]
                 ], resize_keyboard=True)
         await message.answer("Выберите вторую подписку:", reply_markup=kb)
         await state.set_state(AddEditClient.edit_sub_2_type)
 
 @dp.message(AddEditClient.edit_sub_1_type)
 async def edit_sub_1_type(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -1027,15 +1030,15 @@ async def edit_sub_1_type(message: types.Message, state: FSMContext):
     await state.update_data(edit_sub_1_type=message.text)
     kb = None
     if message.text == "EA Play":
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     else:
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     await message.answer("Выберите срок:", reply_markup=kb)
     await state.set_state(AddEditClient.edit_sub_1_duration)
 
 @dp.message(AddEditClient.edit_sub_1_duration)
 async def edit_sub_1_duration(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -1048,12 +1051,12 @@ async def edit_sub_1_duration(message: types.Message, state: FSMContext):
         return
     await state.update_data(edit_sub_1_duration=message.text)
     await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.edit_sub_1_start)
 
 @dp.message(AddEditClient.edit_sub_1_start)
 async def edit_sub_1_start(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -1104,7 +1107,7 @@ async def edit_sub_1_start(message: types.Message, state: FSMContext):
 
 @dp.message(AddEditClient.edit_sub_2_type)
 async def edit_sub_2_type(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -1129,15 +1132,15 @@ async def edit_sub_2_type(message: types.Message, state: FSMContext):
     await state.update_data(edit_sub_2_type=message.text)
     kb = None
     if message.text == "EA Play":
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     else:
-        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Назад")]], resize_keyboard=True)
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="1м"), KeyboardButton(text="3м"), KeyboardButton(text="12м")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     await message.answer("Выберите срок:", reply_markup=kb)
     await state.set_state(AddEditClient.edit_sub_2_duration)
 
 @dp.message(AddEditClient.edit_sub_2_duration)
 async def edit_sub_2_duration(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -1150,12 +1153,12 @@ async def edit_sub_2_duration(message: types.Message, state: FSMContext):
         return
     await state.update_data(edit_sub_2_duration=message.text)
     await message.answer("Дата оформления (дд.мм.гггг):", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Назад")]], resize_keyboard=True))
+        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True))
     await state.set_state(AddEditClient.edit_sub_2_start)
 
 @dp.message(AddEditClient.edit_sub_2_start)
 async def edit_sub_2_start(message: types.Message, state: FSMContext):
-    if message.text == "❌ Назад":
+    if message.text == "❌ Отмена":
         await state.clear()
         await clear_chat(message)
         await start_cmd(message, state)
@@ -1235,6 +1238,7 @@ async def base_dump(message: types.Message, state: FSMContext):
         c_text, _ = format_card(c)
         text += c_text + "\n\n"
     if len(text) > 4000:
+        # Разбиваем на части по 4000 символов
         parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
         for p in parts:
             await message.answer(p)
@@ -1384,5 +1388,5 @@ async def on_startup():
     scheduler.start()
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(dp.start_polling())
+    asyncio.run(on_startup())
+    asyncio.run(dp.start_polling(bot))
