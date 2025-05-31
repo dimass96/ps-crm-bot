@@ -28,15 +28,15 @@ ENCRYPT_KEY = load_key()
 def load_db():
     if not os.path.exists(DB_FILE):
         return []
-    with open(DB_FILE, "rb") as f:
-        try:
+    try:
+        with open(DB_FILE, "rb") as f:
             encrypted = f.read()
             if not encrypted:
                 return []
             decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
             return json.loads(decrypted)
-        except Exception:
-            return []
+    except Exception:
+        return []
 
 def save_db(data):
     if os.path.exists(DB_FILE):
