@@ -1,5 +1,3 @@
-# database.py
-
 import os
 import json
 from datetime import datetime
@@ -7,6 +5,8 @@ from cryptography.fernet import Fernet
 
 DB_FILE = "/data/clients_db.json"
 KEY_FILE = "/data/secret.key"
+BACKUP_DIR = "/data/backups"
+MAX_BACKUPS = 5
 
 def generate_key():
     if not os.path.exists(KEY_FILE):
@@ -43,51 +43,14 @@ def load_db():
 
 def save_db(data):
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
-            backup.write(orig.read())
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        backup_name = f"{BACKUP_DIR}/backup_{now_str}.json"
+        shutil.copyfile(DB_FILE, backup_name)
+        backups = sorted(os.listdir(BACKUP_DIR))
+        while len(backups) > MAX_BACKUPS:
+            os.remove(os.path.join(BACKUP_DIR, backups[0]))
+            backups.pop(0)
     encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
     with open(DB_FILE, "wb") as f:
         f.write(encrypted)
-
-def get_next_client_id(clients):
-    if not clients:
-        return 1
-    return max(c["id"] for c in clients) + 1
-
-def find_clients(query):
-    clients = load_db()
-    results = []
-    q = query.lower()
-    for c in clients:
-        if (q in str(c.get("contact", "")).lower() or
-            q in str(c.get("birth_date", "")).lower() or
-            q in str(c.get("region", "")).lower() or
-            q in str(c.get("console", "")).lower() or
-            any(q in str(val).lower() for val in c.get("games", [])) or
-            q in str(c.get("account", {}).get("login", "")).lower() or
-            q in str(c.get("account", {}).get("password", "")).lower() or
-            q in str(c.get("account", {}).get("mail_pass", "")).lower() or
-            any(q in str(sub.get("name", "")).lower() or q in str(sub.get("duration", "")).lower() for sub in c.get("subscriptions", []))
-        ):
-            results.append(c)
-    return results
-
-def save_new_client(client):
-    clients = load_db()
-    clients.append(client)
-    save_db(clients)
-
-def update_client(client):
-    clients = load_db()
-    for i, c in enumerate(clients):
-        if c["id"] == client["id"]:
-            clients[i] = client
-            save_db(clients)
-            return
-    clients.append(client)
-    save_db(clients)
-
-def delete_client(client_id):
-    clients = load_db()
-    clients = [c for c in clients if c["id"] != client_id]
-    save_db(clients)
