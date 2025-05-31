@@ -1273,7 +1273,7 @@ async def backup_base(message: types.Message, state: FSMContext):
         backups = sorted(glob.glob("/data/backups/backup_*.json"))
         if len(backups) > 5:
             os.remove(backups[0])
-        await message.answer(f"Бэкап базы создан: {backup_name}")
+        await message.answer(f"Бэкап базы создан: {os.path.basename(backup_name)}")
     else:
         await message.answer("База пуста, нечего бэкапить.")
 
@@ -1329,9 +1329,12 @@ async def statistics(message: types.Message, state: FSMContext):
     total = len(clients)
     with_sub = sum(1 for c in clients if c.get("subscriptions") and c["subscriptions"][0].get("name") != "отсутствует")
     without_sub = total - with_sub
-    text = (f"Всего клиентов: {total}\n"
-            f"С подпиской: {with_sub}\n"
-            f"Без подписки: {without_sub}")
+    text = (
+        f"📊 <b>Статистика по базе</b>\n\n"
+        f"👥 Всего клиентов: <b>{total}</b>\n"
+        f"✅ С подпиской: <b>{with_sub}</b>\n"
+        f"❌ Без подписки: <b>{without_sub}</b>"
+    )
     await message.answer(text)
 
 async def main():
