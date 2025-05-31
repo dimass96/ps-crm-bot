@@ -1383,9 +1383,10 @@ async def base_clear_confirm(message: types.Message, state: FSMContext):
     await message.answer("Нажмите кнопку!")
 
 # Запуск
-async def on_startup(_):
+async def on_startup():
     scheduler.start()
 
 if __name__ == "__main__":
-    from aiogram import executor
-    executor.start_polling(dp, on_startup=on_startup)
+    import asyncio
+    asyncio.run(on_startup())
+    asyncio.run(dp.start_polling())
