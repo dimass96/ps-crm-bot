@@ -2,12 +2,12 @@ import os
 import json
 from cryptography.fernet import Fernet
 
-DB_FILE = "clients_db.json"
-KEY_FILE = "secret.key"
+DB_FILE = "/data/clients_db.json"
+KEY_FILE = "/data/secret.key"
 
 def generate_key():
     if not os.path.exists(KEY_FILE):
-        os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True) if os.path.dirname(KEY_FILE) else None
+        os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
         key = Fernet.generate_key()
         with open(KEY_FILE, "wb") as f:
             f.write(key)
@@ -28,48 +28,38 @@ ENCRYPT_KEY = load_key()
 def load_db():
     if not os.path.exists(DB_FILE):
         return []
-    with open(DB_FILE, "rb") as f:
-        try:
+    try:
+        with open(DB_FILE, "rb") as f:
             encrypted = f.read()
-            if not encrypted:
-                return []
-            decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
-            return json.loads(decrypted)
-        except Exception:
+        if not encrypted:
             return []
+        decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
+        return json.loads(decrypted)
+    except Exception:
+        return []
 
 def save_db(data):
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
-            backup.write(orig.read())
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
     with open(DB_FILE, "wb") as f:
         f.write(encrypted)
 
-def get_next_client_id(clients):
-    if not clients:
-        return 1
-    return max(c["id"] for c in clients) + 1
+def backup_db():
+    if os.path.exists(DB_FILE):
+        import shutil
+        backup_name = DB_FILE + ".backup_" + datetime.now().strftime("%Y%m%d%H%M%S")
+        shutil.copy(DB_FILE, backup_name)
+        return backup_name
+    return None
 
-def find_clients(query):
-    clients = load_db()
-    results = []
-    q = query.lower()
-    for c in clients:
-        if (q in str(c.get("contact", "")).lower() or
-            q in str(c.get("birth_date", "")).lower() or
-            q in str(c.get("region", "")).lower() or
-            q in str(c.get("console", "")).lower() or
-            any(q in str(val).lower() for val in c.get("games", [])) or
-            q in str(c.get("account", {}).get("login", "")).lower() or
-            q in str(c.get("account", {}).get("password", "")).lower() or
-            q in str(c.get("account", {}).get("mail_pass", "")).lower() or
-            any(q in str(sub.get("name", "")).lower() or q in str(sub.get("duration", "")).lower() for sub in c.get("subscriptions", []))
-        ):
-            results.append(c)
-    return results
+def restore_db(backup_path):
+    import shutil
+    if os.path.exists(backup_path):
+        shutil.copy(backup_path, DB_FILE)
+        return True
+    return False
 
-def save_new_client(client):
+def add_client(client):
     clients = load_db()
     clients.append(client)
     save_db(clients)
