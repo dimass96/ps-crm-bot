@@ -3,3 +3,5 @@ pyAesCrypt==6.0.0
 python-dateutil
 apscheduler
 cryptography
+aiofiles==23.2.1
+aiohttp==3.9.5
