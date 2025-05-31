@@ -236,7 +236,6 @@ def format_card(client, show_photo_id=False):
     else:
         lines.append(f"\n<b>Без подписки</b>")
     region = client.get("region", "—")
-    # В скобках для региона
     if region and not (region.startswith("(") and region.endswith(")")) and region != "—":
         region = f"({region})"
     lines.append(f"\n🌍 Регион: {region}")
@@ -1169,6 +1168,9 @@ async def edit_sub_2_start_handler(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("save_"))
 async def save_callback(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Нет доступа.")
+        return
     await callback.answer("Изменения сохранены!")
     await state.clear()
     await clear_chat(callback.message)
@@ -1273,7 +1275,7 @@ async def backup_base(message: types.Message, state: FSMContext):
         backups = sorted(glob.glob("/data/backups/backup_*.json"))
         if len(backups) > 5:
             os.remove(backups[0])
-        await message.answer(f"Бэкап базы создан: {os.path.basename(backup_name)}")
+        await message.answer(f"Бэкап базы создан: {backup_name}")
     else:
         await message.answer("База пуста, нечего бэкапить.")
 
@@ -1329,13 +1331,11 @@ async def statistics(message: types.Message, state: FSMContext):
     total = len(clients)
     with_sub = sum(1 for c in clients if c.get("subscriptions") and c["subscriptions"][0].get("name") != "отсутствует")
     without_sub = total - with_sub
-    text = (
-        f"📊 <b>Статистика по базе</b>\n\n"
-        f"👥 Всего клиентов: <b>{total}</b>\n"
-        f"✅ С подпиской: <b>{with_sub}</b>\n"
-        f"❌ Без подписки: <b>{without_sub}</b>"
-    )
-    await message.answer(text)
+    text = (f"📊 <b>Статистика по базе клиентов</b>\n\n"
+            f"👥 Всего клиентов: <b>{total}</b>\n"
+            f"✅ С подпиской: <b>{with_sub}</b>\n"
+            f"❌ Без подписки: <b>{without_sub}</b>")
+    await message.answer(text, parse_mode=ParseMode.HTML)
 
 async def main():
     scheduler.start()
