@@ -919,9 +919,6 @@ async def sub_edit_select(message, state: FSMContext, sub_num=1, only_one=False)
         await message.answer("Выберите вторую подписку:", reply_markup=kb)
         await state.set_state(AddEditClient.edit_sub_2_type)
 
-# Подписки редактирование: sub_1_type, sub_1_duration, sub_1_start, sub_2_type, sub_2_duration, sub_2_start
-# Логика примерно повторяет добавление, с проверкой отмены и сохранением в базу
-
 @dp.callback_query(F.data.startswith("save_"))
 async def save_client_changes(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -938,8 +935,7 @@ async def save_client_changes(callback: types.CallbackQuery, state: FSMContext):
     await clear_chat(callback.message)
     await clear_and_main_menu(callback.message, state)
 
-# --- База ---
-
+# --- БАЗА ---
 def base_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -1173,6 +1169,94 @@ async def clear_confirm(callback: types.CallbackQuery, state: FSMContext):
         await clear_chat(callback.message)
         await clear_and_main_menu(callback.message, state)
         await callback.answer()
+
+# --- СТАТИСТИКА ---
+
+@dp.message(F.text == "📊 Статистика")
+async def stats_menu(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Нет доступа.")
+        return
+
+    clients = load_db()
+    total_clients = len(clients)
+    if total_clients == 0:
+        await message.answer("База клиентов пуста.")
+        return
+
+    with_subs = 0
+    without_subs = 0
+    subs_count = {
+        "PS Plus Deluxe": 0,
+        "PS Plus Extra": 0,
+        "PS Plus Essential": 0,
+        "EA Play": 0,
+    }
+    subs_ending_soon = 0
+    birthday_soon = 0
+    regions_count = {}
+    consoles_count = {}
+
+    now = datetime.now()
+
+    for c in clients:
+        subs = c.get("subscriptions", [])
+        if subs and subs[0].get("name") != "отсутствует":
+            with_subs += 1
+        else:
+            without_subs += 1
+
+        for sub in subs:
+            name = sub.get("name")
+            if name in subs_count:
+                subs_count[name] += 1
+            try:
+                end_date = datetime.strptime(sub.get("end", "01.01.1900"), "%d.%m.%Y")
+                if 0 <= (end_date - now).days <= 7:
+                    subs_ending_soon += 1
+            except:
+                pass
+
+        bdate = c.get("birth_date")
+        if bdate and bdate != "отсутствует":
+            try:
+                dt = datetime.strptime(bdate, "%d.%m.%Y")
+                birthday_this_year = dt.replace(year=now.year)
+                delta = (birthday_this_year - now).days
+                if 0 <= delta <= 7:
+                    birthday_soon += 1
+            except:
+                pass
+
+        region = c.get("region", "—")
+        regions_count[region] = regions_count.get(region, 0) + 1
+
+        console = c.get("console", "—")
+        consoles_count[console] = consoles_count.get(console, 0) + 1
+
+    lines = [
+        f"📊 <b>Статистика по базе</b>",
+        f"Общее количество клиентов: <b>{total_clients}</b>",
+        f"С подписками: <b>{with_subs}</b>",
+        f"Без подписок: <b>{without_subs}</b>",
+        "",
+        f"📅 Подписки:",
+    ]
+    for name, count in subs_count.items():
+        lines.append(f"• {name}: <b>{count}</b>")
+    lines.append("")
+    lines.append(f"⚠️ Подписки, заканчивающиеся в ближайшие 7 дней: <b>{subs_ending_soon}</b>")
+    lines.append(f"🎂 Клиенты с ДР в ближайшие 7 дней: <b>{birthday_soon}</b>")
+    lines.append("")
+    lines.append("🌍 Распределение по регионам:")
+    for region, count in regions_count.items():
+        lines.append(f"• {region}: <b>{count}</b>")
+    lines.append("")
+    lines.append("🎮 Распределение по консолям:")
+    for console, count in consoles_count.items():
+        lines.append(f"• {console}: <b>{count}</b>")
+
+    await message.answer("\n".join(lines))
 
 # Запуск планировщика и бота
 async def main():
