@@ -507,18 +507,12 @@ async def sub1_start(message: types.Message, state: FSMContext):
     data = await state.get_data()
     duration = data.get("sub_1_duration")
     months = int(duration.replace("м", ""))
-    try:
-        year = start.year + (start.month - 1 + months) // 12
-        month = (start.month - 1 + months) % 12 + 1
-        day = start.day
-        end = start.replace(year=year, month=month, day=day)
-    except:
-        end = start + timedelta(days=months*30)
+    end_date = calculate_end_date(message.text.strip(), months)
     sub = {
         "name": data.get("sub_1_type"),
         "duration": duration,
         "start": message.text.strip(),
-        "end": end.strftime("%d.%m.%Y")
+        "end": end_date
     }
     await state.update_data(sub_1=sub)
     subs_total = data.get("subs_total", 1)
@@ -584,18 +578,12 @@ async def sub2_start(message: types.Message, state: FSMContext):
     data = await state.get_data()
     duration = data.get("sub_2_duration")
     months = int(duration.replace("м", ""))
-    try:
-        year = start.year + (start.month - 1 + months) // 12
-        month = (start.month - 1 + months) % 12 + 1
-        day = start.day
-        end = start.replace(year=year, month=month, day=day)
-    except:
-        end = start + timedelta(days=months*30)
+    end_date = calculate_end_date(message.text.strip(), months)
     sub = {
         "name": data.get("sub_2_type"),
         "duration": duration,
         "start": message.text.strip(),
-        "end": end.strftime("%d.%m.%Y")
+        "end": end_date
     }
     subs = [data.get("sub_1"), sub]
     await state.update_data(sub_2=sub, subscriptions=subs)
@@ -873,7 +861,7 @@ async def edit_text_input(message: types.Message, state: FSMContext):
     await message.answer("Ошибка при обновлении.")
     await state.clear()
 
-# --- Backup & Restore & Clear Database ---
+# --- Base Menu Handlers ---
 @dp.message(F.text == "📦 База")
 async def base_menu_handler(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -892,25 +880,22 @@ async def base_export(message: types.Message, state: FSMContext):
     if not clients:
         await message.answer("База пуста.")
         return
-    text_list = []
     for client in clients:
-        text, _ = format_card(client, show_photo_id=False)
-        text_list.append(text)
-    full_text = "\n\n".join(text_list)
-    # Telegram message limit ~4096 chars, split if needed
-    max_len = 4000
-    for i in range(0, len(full_text), max_len):
-        await message.answer(full_text[i:i+max_len])
-        
+        text, photo_id = format_card(client, show_photo_id=True)
+        if photo_id:
+            sent = await message.answer_photo(photo_id, caption=text, reply_markup=edit_keyboard(client))
+        else:
+            sent = await message.answer(text, reply_markup=edit_keyboard(client))
+        scheduler.add_job(lambda: asyncio.create_task(delete_message(sent.chat.id, sent.message_id)), "date", run_date=datetime.now() + timedelta(minutes=5))
+
 @dp.message(F.text == "🗑️ Очистить базу")
 async def clear_db_confirm_1(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         await message.answer("Нет доступа.")
         return
     await message.answer("Вы уверены, что хотите очистить базу? Это действие нельзя отменить.", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Да"), KeyboardButton(text="Нет")]
-        ], resize_keyboard=True))
+        keyboard=[[KeyboardButton(text="Да"), KeyboardButton(text="Нет")]],
+        resize_keyboard=True))
     await state.set_state(AddEditClient.awaiting_confirm_clear)
 
 @dp.message(AddEditClient.awaiting_confirm_clear)
