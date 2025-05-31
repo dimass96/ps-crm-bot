@@ -1,29 +1,78 @@
-import json
 import os
+import json
+from cryptography.fernet import Fernet
 
 DB_FILE = "clients_db.json"
+KEY_FILE = "secret.key"
+
+def generate_key():
+    if not os.path.exists(KEY_FILE):
+        os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True) if os.path.dirname(KEY_FILE) else None
+        key = Fernet.generate_key()
+        with open(KEY_FILE, "wb") as f:
+            f.write(key)
+
+def load_key():
+    with open(KEY_FILE, "rb") as f:
+        return f.read()
+
+def encrypt_data(data: str, key: bytes) -> bytes:
+    return Fernet(key).encrypt(data.encode())
+
+def decrypt_data(token: bytes, key: bytes) -> str:
+    return Fernet(key).decrypt(token).decode()
+
+generate_key()
+ENCRYPT_KEY = load_key()
 
 def load_db():
     if not os.path.exists(DB_FILE):
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump([], f, ensure_ascii=False)
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return []
+    with open(DB_FILE, "rb") as f:
+        try:
+            encrypted = f.read()
+            if not encrypted:
+                return []
+            decrypted = decrypt_data(encrypted, ENCRYPT_KEY)
+            return json.loads(decrypted)
+        except Exception:
+            return []
 
-def save_db(clients):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(clients, f, ensure_ascii=False, indent=2)
+def save_db(data):
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "rb") as orig, open(DB_FILE + "_backup", "wb") as backup:
+            backup.write(orig.read())
+    encrypted = encrypt_data(json.dumps(data, ensure_ascii=False, indent=2), ENCRYPT_KEY)
+    with open(DB_FILE, "wb") as f:
+        f.write(encrypted)
 
 def get_next_client_id(clients):
-    return max([c.get("id", 0) for c in clients], default=0) + 1
+    if not clients:
+        return 1
+    return max(c["id"] for c in clients) + 1
 
-def find_client(query):
+def find_clients(query):
     clients = load_db()
-    query = query.lower().strip()
-    for client in clients:
-        if str(client.get("contact", "")).lower() == query:
-            return client
-    return None
+    results = []
+    q = query.lower()
+    for c in clients:
+        if (q in str(c.get("contact", "")).lower() or
+            q in str(c.get("birth_date", "")).lower() or
+            q in str(c.get("region", "")).lower() or
+            q in str(c.get("console", "")).lower() or
+            any(q in str(val).lower() for val in c.get("games", [])) or
+            q in str(c.get("account", {}).get("login", "")).lower() or
+            q in str(c.get("account", {}).get("password", "")).lower() or
+            q in str(c.get("account", {}).get("mail_pass", "")).lower() or
+            any(q in str(sub.get("name", "")).lower() or q in str(sub.get("duration", "")).lower() for sub in c.get("subscriptions", []))
+        ):
+            results.append(c)
+    return results
+
+def save_new_client(client):
+    clients = load_db()
+    clients.append(client)
+    save_db(clients)
 
 def update_client(client):
     clients = load_db()
@@ -32,9 +81,6 @@ def update_client(client):
             clients[i] = client
             save_db(clients)
             return
-
-def save_new_client(client):
-    clients = load_db()
     clients.append(client)
     save_db(clients)
 
